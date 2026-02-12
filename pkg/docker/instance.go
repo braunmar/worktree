@@ -8,9 +8,9 @@ import (
 )
 
 // IsFeatureRunning checks if a specific feature worktree is running
-func IsFeatureRunning(featureName string) bool {
-	// Container name format: skillsetup-{feature-name}-app-1
-	prefix := fmt.Sprintf("skillsetup-%s-", featureName)
+func IsFeatureRunning(projectName, featureName string) bool {
+	// Container name format: {project-name}-{feature-name}-app-1
+	prefix := fmt.Sprintf("%s-%s-", projectName, featureName)
 
 	cmd := exec.Command("docker", "ps", "--filter", fmt.Sprintf("name=%s", prefix), "--format", "{{.Names}}")
 	var stdout bytes.Buffer
@@ -25,8 +25,9 @@ func IsFeatureRunning(featureName string) bool {
 }
 
 // GetRunningFeatures returns a list of running feature names
-func GetRunningFeatures() ([]string, error) {
-	cmd := exec.Command("docker", "ps", "--filter", "name=skillsetup-", "--format", "{{.Names}}")
+func GetRunningFeatures(projectName string) ([]string, error) {
+	prefix := projectName + "-"
+	cmd := exec.Command("docker", "ps", "--filter", fmt.Sprintf("name=%s", prefix), "--format", "{{.Names}}")
 	var stdout bytes.Buffer
 	cmd.Stdout = &stdout
 
@@ -43,10 +44,10 @@ func GetRunningFeatures() ([]string, error) {
 		}
 
 		// Extract feature name from container name
-		// Format: skillsetup-{feature-name}-{service}-1
-		if strings.HasPrefix(line, "skillsetup-") {
-			// Remove "skillsetup-" prefix
-			rest := strings.TrimPrefix(line, "skillsetup-")
+		// Format: {project-name}-{feature-name}-{service}-1
+		if strings.HasPrefix(line, prefix) {
+			// Remove "{project-name}-" prefix
+			rest := strings.TrimPrefix(line, prefix)
 
 			// Split by "-" and take all parts except the last two (service-1)
 			parts := strings.Split(rest, "-")
@@ -67,30 +68,117 @@ func GetRunningFeatures() ([]string, error) {
 	return features, nil
 }
 
-// StopFeature stops a specific feature worktree
-func StopFeature(featureName string, worktreePath string) error {
-	// Change to backend directory and run make down
-	backendDir := worktreePath + "/backend"
+// StopFeature stops a specific feature worktree using a multi-tier approach
+// It stops containers for all active projects (backend, frontend, etc.)
+// projectInfo maps project directory to its compose project name
+func StopFeature(projectName, featureName string, worktreePath string, projectInfo map[string]string) error {
+	defaultComposeProject := fmt.Sprintf("%s-%s", projectName, featureName)
 
-	cmd := exec.Command("make", "down")
-	cmd.Dir = backendDir
+	// Tier 1: Try docker compose down in each project directory with correct compose project name
+	allStopped := true
+	for projectDir, composeName := range projectInfo {
+		fullPath := worktreePath + "/" + projectDir
+		if err := stopViaCompose(fullPath, composeName); err != nil {
+			allStopped = false
+		}
+	}
+	if allStopped && len(projectInfo) > 0 {
+		return nil
+	}
 
-	// Set environment variable for compose project name
-	cmd.Env = append(cmd.Env, fmt.Sprintf("COMPOSE_PROJECT_NAME=skillsetup-%s", featureName))
+	// Tier 2: Try docker compose with explicit project names (no directory needed)
+	allStopped = true
+	for _, composeName := range projectInfo {
+		if err := stopViaComposeProject(composeName); err != nil {
+			allStopped = false
+		}
+	}
+	if allStopped && len(projectInfo) > 0 {
+		return nil
+	}
+
+	// Tier 3: Fall back to stopping individual containers by compose project names
+	for _, composeName := range projectInfo {
+		if err := stopContainersByName(composeName); err != nil {
+			// Continue trying other projects even if one fails
+		}
+	}
+
+	// Tier 4: Last resort - try with default compose project name (for legacy compatibility)
+	if err := stopContainersByName(defaultComposeProject); err == nil {
+		return nil
+	}
+
+	// If all methods fail, return error but allow removal to continue
+	return fmt.Errorf("unable to stop services (docker may not be available)")
+}
+
+// stopViaCompose runs docker compose down in the specified directory
+func stopViaCompose(dir string, composeProject string) error {
+	cmd := exec.Command("docker", "compose", "-p", composeProject, "down", "--remove-orphans")
+	cmd.Dir = dir
 
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("failed to stop feature: %s", stderr.String())
+		return fmt.Errorf("compose down failed: %s", stderr.String())
+	}
+	return nil
+}
+
+// stopViaComposeProject runs docker compose down with explicit project name
+func stopViaComposeProject(composeProject string) error {
+	cmd := exec.Command("docker", "compose", "-p", composeProject, "down", "--remove-orphans")
+
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("compose -p down failed: %s", stderr.String())
+	}
+	return nil
+}
+
+// stopContainersByName finds and stops containers by name pattern
+func stopContainersByName(composeProject string) error {
+	// Find running containers
+	prefix := composeProject + "-"
+	cmd := exec.Command("docker", "ps", "-q", "--filter", fmt.Sprintf("name=%s", prefix))
+	var stdout bytes.Buffer
+	cmd.Stdout = &stdout
+
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("failed to list containers: %w", err)
+	}
+
+	containerIDs := strings.Fields(strings.TrimSpace(stdout.String()))
+	if len(containerIDs) == 0 {
+		// No containers running - this is fine
+		return nil
+	}
+
+	// Stop containers
+	args := append([]string{"stop"}, containerIDs...)
+	stopCmd := exec.Command("docker", args...)
+	if err := stopCmd.Run(); err != nil {
+		return fmt.Errorf("failed to stop containers: %w", err)
+	}
+
+	// Remove containers
+	args = append([]string{"rm"}, containerIDs...)
+	rmCmd := exec.Command("docker", args...)
+	if err := rmCmd.Run(); err != nil {
+		// Warn but don't fail - containers are stopped
+		return nil
 	}
 
 	return nil
 }
 
 // GetFeatureContainerStatus returns the status of containers for a feature
-func GetFeatureContainerStatus(featureName string) (map[string]string, error) {
-	prefix := fmt.Sprintf("skillsetup-%s-", featureName)
+func GetFeatureContainerStatus(projectName, featureName string) (map[string]string, error) {
+	prefix := fmt.Sprintf("%s-%s-", projectName, featureName)
 
 	cmd := exec.Command("docker", "ps", "-a", "--filter", fmt.Sprintf("name=%s", prefix), "--format", "{{.Names}}:{{.Status}}")
 	var stdout bytes.Buffer
@@ -111,7 +199,7 @@ func GetFeatureContainerStatus(featureName string) (map[string]string, error) {
 		parts := strings.SplitN(line, ":", 2)
 		if len(parts) == 2 {
 			// Extract service name from container name
-			// Format: skillsetup-{feature-name}-{service}-1
+			// Format: {project-name}-{feature-name}-{service}-1
 			name := parts[0]
 
 			// Remove prefix to get service name
@@ -120,113 +208,6 @@ func GetFeatureContainerStatus(featureName string) (map[string]string, error) {
 			if len(serviceParts) >= 2 {
 				// Service is everything except the last part (which is the replica number)
 				service := strings.Join(serviceParts[:len(serviceParts)-1], "-")
-				status[service] = parts[1]
-			}
-		}
-	}
-
-	return status, nil
-}
-
-// Legacy functions for backward compatibility during transition
-// These will be removed once all commands are updated
-
-// IsInstanceRunning checks if a specific instance is running (DEPRECATED)
-func IsInstanceRunning(instance int) (bool, error) {
-	containerName := fmt.Sprintf("skillsetup-inst%d-app-1", instance)
-
-	cmd := exec.Command("docker", "ps", "--filter", fmt.Sprintf("name=%s", containerName), "--format", "{{.Names}}")
-	var stdout bytes.Buffer
-	cmd.Stdout = &stdout
-
-	if err := cmd.Run(); err != nil {
-		return false, fmt.Errorf("failed to check docker status: %w", err)
-	}
-
-	output := strings.TrimSpace(stdout.String())
-	return output == containerName, nil
-}
-
-// GetRunningInstances returns a list of running instance numbers (DEPRECATED)
-func GetRunningInstances() ([]int, error) {
-	cmd := exec.Command("docker", "ps", "--filter", "name=skillsetup-inst", "--format", "{{.Names}}")
-	var stdout bytes.Buffer
-	cmd.Stdout = &stdout
-
-	if err := cmd.Run(); err != nil {
-		return nil, fmt.Errorf("failed to list docker containers: %w", err)
-	}
-
-	instances := []int{}
-	lines := strings.Split(strings.TrimSpace(stdout.String()), "\n")
-
-	for _, line := range lines {
-		if line == "" {
-			continue
-		}
-
-		// Extract instance number from container name
-		// Format: skillsetup-inst{N}-app-1
-		if strings.HasPrefix(line, "skillsetup-inst") {
-			parts := strings.Split(line, "-")
-			if len(parts) >= 2 {
-				var instanceNum int
-				if _, err := fmt.Sscanf(parts[1], "inst%d", &instanceNum); err == nil {
-					instances = append(instances, instanceNum)
-				}
-			}
-		}
-	}
-
-	return instances, nil
-}
-
-// StopInstance stops a specific instance (DEPRECATED)
-func StopInstance(instance int, projectRoot string) error {
-	// Change to backend directory and run make down
-	backendDir := projectRoot + "/backend"
-
-	cmd := exec.Command("make", "down", fmt.Sprintf("INSTANCE=%d", instance))
-	cmd.Dir = backendDir
-
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("failed to stop instance: %s", stderr.String())
-	}
-
-	return nil
-}
-
-// GetContainerStatus returns the status of containers for an instance (DEPRECATED)
-func GetContainerStatus(instance int) (map[string]string, error) {
-	prefix := fmt.Sprintf("skillsetup-inst%d-", instance)
-
-	cmd := exec.Command("docker", "ps", "-a", "--filter", fmt.Sprintf("name=%s", prefix), "--format", "{{.Names}}:{{.Status}}")
-	var stdout bytes.Buffer
-	cmd.Stdout = &stdout
-
-	if err := cmd.Run(); err != nil {
-		return nil, fmt.Errorf("failed to get container status: %w", err)
-	}
-
-	status := make(map[string]string)
-	lines := strings.Split(strings.TrimSpace(stdout.String()), "\n")
-
-	for _, line := range lines {
-		if line == "" {
-			continue
-		}
-
-		parts := strings.SplitN(line, ":", 2)
-		if len(parts) == 2 {
-			// Extract service name from container name
-			// Format: skillsetup-inst{N}-{service}-1
-			name := parts[0]
-			nameParts := strings.Split(name, "-")
-			if len(nameParts) >= 3 {
-				service := nameParts[2]
 				status[service] = parts[1]
 			}
 		}

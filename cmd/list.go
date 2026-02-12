@@ -6,11 +6,11 @@ import (
 	"path/filepath"
 	"sort"
 
-	"worktree/pkg/config"
-	"worktree/pkg/docker"
-	"worktree/pkg/git"
-	"worktree/pkg/registry"
-	"worktree/pkg/ui"
+	"github.com/braunmar/worktree/pkg/config"
+	"github.com/braunmar/worktree/pkg/docker"
+	"github.com/braunmar/worktree/pkg/git"
+	"github.com/braunmar/worktree/pkg/registry"
+	"github.com/braunmar/worktree/pkg/ui"
 
 	"github.com/spf13/cobra"
 )
@@ -23,8 +23,7 @@ var listCmd = &cobra.Command{
 Shows:
 - Feature name
 - Branch name
-- Backend status (clean/modified)
-- Frontend status (clean/modified)
+- Project status for each configured project (clean/modified)
 - Running status
 - Port mapping
 
@@ -50,8 +49,12 @@ func runList(cmd *cobra.Command, args []string) {
 		return
 	}
 
+	// Load worktree configuration
+	workCfg, err := config.LoadWorktreeConfig(cfg.ProjectRoot)
+	checkError(err)
+
 	// Load registry
-	reg, err := registry.Load(cfg.WorktreeDir)
+	reg, err := registry.Load(cfg.WorktreeDir, workCfg)
 	if err != nil {
 		checkError(fmt.Errorf("failed to load registry: %w", err))
 	}
@@ -79,42 +82,50 @@ func runList(cmd *cobra.Command, args []string) {
 			continue
 		}
 
-		// Get worktree information
-		backendWorktree := cfg.WorktreeBackendPath(featureName)
-		frontendWorktree := cfg.WorktreeFrontendPath(featureName)
+		featureDir := cfg.WorktreeFeaturePath(featureName)
 
-		backendBranch := wt.Branch
-		if branchName, err := git.GetWorktreeBranch(backendWorktree); err == nil {
-			backendBranch = branchName
+		// Get branch name from first project
+		displayBranch := wt.Branch
+		if len(wt.Projects) > 0 {
+			firstProject := workCfg.Projects[wt.Projects[0]]
+			firstWorktreePath := featureDir + "/" + firstProject.Dir
+			if branchName, err := git.GetWorktreeBranch(firstWorktreePath); err == nil {
+				displayBranch = branchName
+			}
 		}
 
-		backendChanges, _ := git.HasUncommittedChanges(backendWorktree)
-		backendCount, _ := git.GetUncommittedChangesCount(backendWorktree)
-
-		frontendChanges, _ := git.HasUncommittedChanges(frontendWorktree)
-		frontendCount, _ := git.GetUncommittedChangesCount(frontendWorktree)
-
 		// Check if feature is running
-		running := docker.IsFeatureRunning(featureName)
+		running := docker.IsFeatureRunning(workCfg.ProjectName, featureName)
 
 		// Display feature information
 		fmt.Printf("Feature: %s\n", featureName)
 		fmt.Printf("  Path:     %s\n", filepath.Join("worktrees", featureName))
-		fmt.Printf("  Branch:   %s\n", backendBranch)
+		fmt.Printf("  Branch:   %s\n", displayBranch)
 		fmt.Printf("  Created:  %s\n", wt.Created.Format("2006-01-02 15:04"))
 
-		// Backend status
-		if backendChanges {
-			fmt.Printf("  Backend:  ⚠️  modified (%d uncommitted changes)\n", backendCount)
-		} else {
-			fmt.Printf("  Backend:  ✅ clean\n")
-		}
+		// Show status for each project
+		for _, projectName := range wt.Projects {
+			project, exists := workCfg.Projects[projectName]
+			if !exists {
+				continue
+			}
 
-		// Frontend status
-		if frontendChanges {
-			fmt.Printf("  Frontend: ⚠️  modified (%d uncommitted changes)\n", frontendCount)
-		} else {
-			fmt.Printf("  Frontend: ✅ clean\n")
+			worktreePath := featureDir + "/" + project.Dir
+
+			// Check if worktree exists
+			if _, err := os.Stat(worktreePath); os.IsNotExist(err) {
+				fmt.Printf("  %s: ⚠️  worktree not found\n", projectName)
+				continue
+			}
+
+			changes, _ := git.HasUncommittedChanges(worktreePath)
+			count, _ := git.GetUncommittedChangesCount(worktreePath)
+
+			if changes {
+				fmt.Printf("  %s: ⚠️  modified (%d uncommitted changes)\n", projectName, count)
+			} else {
+				fmt.Printf("  %s: ✅ clean\n", projectName)
+			}
 		}
 
 		// Running status
@@ -124,20 +135,28 @@ func runList(cmd *cobra.Command, args []string) {
 			fmt.Printf("  Status:   ⚪ Stopped\n")
 		}
 
-		// Ports from registry
-		if len(wt.Ports) > 0 {
-			fmt.Print("  Ports:    ")
-			portStrs := []string{}
+		// All exported env vars: prefer computed_vars (ports + derived values, fully resolved).
+		// Fall back to the raw ports map for legacy entries that predate computed_vars.
+		if len(wt.ComputedVars) > 0 {
+			varKeys := make([]string, 0, len(wt.ComputedVars))
+			for k := range wt.ComputedVars {
+				varKeys = append(varKeys, k)
+			}
+			sort.Strings(varKeys)
 
-			// Show main ports first
+			fmt.Printf("  Vars:     %s=%s\n", varKeys[0], wt.ComputedVars[varKeys[0]])
+			for i := 1; i < len(varKeys); i++ {
+				fmt.Printf("            %s=%s\n", varKeys[i], wt.ComputedVars[varKeys[i]])
+			}
+		} else if len(wt.Ports) > 0 {
+			// Legacy fallback: show raw port allocations
+			portStrs := []string{}
 			mainPorts := []string{"FE_PORT", "BE_PORT", "POSTGRES_PORT"}
 			for _, key := range mainPorts {
 				if port, ok := wt.Ports[key]; ok {
 					portStrs = append(portStrs, fmt.Sprintf("%s=%d", key, port))
 				}
 			}
-
-			// Show other ports
 			for key, port := range wt.Ports {
 				isMain := false
 				for _, mainKey := range mainPorts {
@@ -150,9 +169,8 @@ func runList(cmd *cobra.Command, args []string) {
 					portStrs = append(portStrs, fmt.Sprintf("%s=%d", key, port))
 				}
 			}
-
 			if len(portStrs) > 0 {
-				fmt.Printf("%s\n", portStrs[0])
+				fmt.Printf("  Ports:    %s\n", portStrs[0])
 				for i := 1; i < len(portStrs) && i < 3; i++ {
 					fmt.Printf("            %s\n", portStrs[i])
 				}

@@ -4,15 +4,15 @@ import (
 	"fmt"
 	"os"
 
-	"worktree/pkg/config"
-	"worktree/pkg/registry"
-	"worktree/pkg/ui"
+	"github.com/braunmar/worktree/pkg/config"
+	"github.com/braunmar/worktree/pkg/registry"
+	"github.com/braunmar/worktree/pkg/ui"
 
 	"github.com/spf13/cobra"
 )
 
 var portsCmd = &cobra.Command{
-	Use:   "ports <feature-name>",
+	Use:   "ports [feature-name]",
 	Short: "Show port mapping for a feature",
 	Long: `Show port mapping for a specific feature worktree.
 
@@ -24,22 +24,45 @@ Displays:
 - Mailpit SMTP port
 - LocalStack port
 
-Example:
-  worktree ports feature-user-auth
-  worktree ports feature-reports`,
-	Args: cobra.ExactArgs(1),
+If no feature name is provided and you're in a worktree directory,
+the feature will be auto-detected from .worktree-instance.
+
+Examples:
+  worktree ports feature-user-auth    # Explicit feature name
+  worktree ports                      # Auto-detect from current directory`,
+	Args: cobra.MaximumNArgs(1),
 	Run:  runPorts,
 }
 
 func runPorts(cmd *cobra.Command, args []string) {
-	featureName := args[0]
+	var featureName string
+	autoDetected := false
+
+	// Auto-detect feature name if not provided
+	if len(args) == 0 {
+		instance, err := config.DetectInstance()
+		if err != nil {
+			ui.Error("Not in a worktree directory and no feature name provided")
+			ui.Info("Usage: worktree ports <feature-name>")
+			ui.Info("   or: cd to a worktree directory and run: worktree ports")
+			os.Exit(1)
+		}
+		featureName = instance.Feature
+		autoDetected = true
+	} else {
+		featureName = args[0]
+	}
 
 	// Get configuration
 	cfg, err := config.New()
 	checkError(err)
 
+	// Load worktree configuration
+	workCfg, err := config.LoadWorktreeConfig(cfg.ProjectRoot)
+	checkError(err)
+
 	// Load registry
-	reg, err := registry.Load(cfg.WorktreeDir)
+	reg, err := registry.Load(cfg.WorktreeDir, workCfg)
 	checkError(err)
 
 	// Get worktree from registry
@@ -55,14 +78,20 @@ func runPorts(cmd *cobra.Command, args []string) {
 
 	// Display header
 	ui.PrintHeader(fmt.Sprintf("Ports for Feature: %s", featureName))
+	if autoDetected {
+		ui.Info("✨ Auto-detected from current directory")
+	}
 	ui.NewLine()
 
-	// Show ports from registry
-	ui.PrintStatusLine("Frontend", fmt.Sprintf("http://localhost:%d", wt.Ports["FE_PORT"]))
-	ui.PrintStatusLine("Backend", fmt.Sprintf("http://localhost:%d", wt.Ports["BE_PORT"]))
-	ui.PrintStatusLine("PostgreSQL", fmt.Sprintf("localhost:%d", wt.Ports["POSTGRES_PORT"]))
-	ui.PrintStatusLine("Mailpit UI", fmt.Sprintf("http://localhost:%d", wt.Ports["MAILPIT_UI_PORT"]))
-	ui.PrintStatusLine("Mailpit SMTP", fmt.Sprintf("localhost:%d", wt.Ports["MAILPIT_SMTP_PORT"]))
-	ui.PrintStatusLine("LocalStack", fmt.Sprintf("http://localhost:%d", wt.Ports["LOCALSTACK_PORT"]))
+	// Show ports from registry dynamically
+	displayServices := workCfg.GetDisplayableServices(wt.Ports)
+	for name, url := range displayServices {
+		ui.PrintStatusLine(name, url)
+	}
+
+	// Show additional ports that have port numbers but no URL
+	if port, exists := wt.Ports["MAILPIT_SMTP_PORT"]; exists {
+		ui.PrintStatusLine("Mailpit SMTP", fmt.Sprintf("%s:%d", workCfg.Hostname, port))
+	}
 	ui.NewLine()
 }

@@ -1,0 +1,21 @@
+coverage:
+  status:
+    project:
+      default:
+        target: 80%
+        threshold: 1%
+    patch:
+      default:
+        target: 80%
+
+comment:
+  layout: "header, diff, files"
+  behavior: default
+  require_changes: false
+
+# Ignore patterns exclude source files from coverage reporting
+# Test files are excluded because we measure coverage OF production code, not OF tests
+# Coverage from system tests (test/system/) IS included for production code (pkg/, cmd/)
+ignore:
+  - "**/*_test.go"
+  - "test/**"

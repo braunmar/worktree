@@ -1,4 +1,4 @@
-.PHONY: build install install-global install-user uninstall clean test help tidy fmt vet
+.PHONY: build install install-global install-user uninstall clean test test-coverage test-system test-system-coverage test-all test-all-coverage help tidy fmt vet
 
 # Default target
 .DEFAULT_GOAL := help
@@ -64,9 +64,42 @@ clean: ## Remove built binary
 	@rm -f ./worktree
 	@echo "✅ Cleaned"
 
-test: ## Run tests
-	@echo "🧪 Running tests..."
-	@go test -v ./...
+test: ## Run unit tests (pkg/ only)
+	@echo "🧪 Running unit tests..."
+	@go test -v ./pkg/...
+
+test-coverage: ## Run unit tests with coverage
+	@echo "🧪 Running unit tests with coverage..."
+	@go test -v -race -coverprofile=coverage-unit.out -covermode=atomic ./pkg/...
+	@echo "📊 Coverage saved to: coverage-unit.out"
+	@go tool cover -func=coverage-unit.out | tail -1
+
+test-system: ## Run system/integration tests (builds binary, requires git)
+	@echo "🧪 Running system tests..."
+	@go test -v -timeout 120s ./test/system/...
+
+test-system-coverage: ## Run system tests with coverage
+	@echo "🧪 Running system tests with coverage..."
+	@go test -v -race -timeout 120s -coverprofile=coverage-system.out -covermode=atomic ./test/system/...
+	@echo "📊 Coverage saved to: coverage-system.out"
+	@go tool cover -func=coverage-system.out | tail -1
+
+test-all: test test-system ## Run all tests (unit + system, no coverage)
+
+test-all-coverage: ## Run all tests with merged coverage (matches CI workflow)
+	@echo "🧪 Running unit tests with coverage..."
+	@go test -v -race -coverprofile=coverage-unit.out -covermode=atomic ./pkg/...
+	@echo ""
+	@echo "🧪 Running system tests with coverage..."
+	@go test -v -race -timeout 120s -coverprofile=coverage-system.out -covermode=atomic ./test/system/...
+	@echo ""
+	@echo "📊 Merging coverage profiles..."
+	@echo "mode: atomic" > coverage.out
+	@tail -q -n +2 coverage-unit.out coverage-system.out >> coverage.out
+	@echo "✅ Merged coverage saved to: coverage.out"
+	@go tool cover -func=coverage.out | tail -1
+	@echo ""
+	@echo "💡 View HTML coverage: go tool cover -html=coverage.out"
 
 tidy: ## Tidy go modules
 	@echo "📦 Tidying go modules..."

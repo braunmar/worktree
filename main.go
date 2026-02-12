@@ -1,8 +1,8 @@
 package main
 
 import (
+	"github.com/braunmar/worktree/cmd"
 	"os"
-	"worktree/cmd"
 )
 
 func main() {

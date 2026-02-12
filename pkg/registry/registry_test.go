@@ -5,7 +5,30 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/braunmar/worktree/pkg/config"
 )
+
+// testConfig creates a WorktreeConfig with standard port ranges for testing
+func testConfig() *config.WorktreeConfig {
+	feRange := [2]int{3000, 3100}
+	beRange := [2]int{8080, 8180}
+	pgRange := [2]int{5432, 5532}
+
+	return &config.WorktreeConfig{
+		EnvVariables: map[string]config.EnvVarConfig{
+			"FE_PORT": {
+				Range: &feRange,
+			},
+			"BE_PORT": {
+				Range: &beRange,
+			},
+			"POSTGRES_PORT": {
+				Range: &pgRange,
+			},
+		},
+	}
+}
 
 func TestNormalizeBranchName(t *testing.T) {
 	tests := []struct {
@@ -43,7 +66,7 @@ func TestRegistryLoadAndSave(t *testing.T) {
 	defer os.RemoveAll(tempDir)
 
 	// Load registry (should create empty one)
-	reg, err := Load(tempDir)
+	reg, err := Load(tempDir, nil)
 	if err != nil {
 		t.Fatalf("Failed to load registry: %v", err)
 	}
@@ -60,7 +83,7 @@ func TestRegistryLoadAndSave(t *testing.T) {
 		Created:        time.Now(),
 		Projects:       []string{"backend", "frontend"},
 		Ports:          map[string]int{"FE_PORT": 3001, "BE_PORT": 8081},
-		ComposeProject: "skillsetup-feature-test",
+		ComposeProject: "myproject-feature-test",
 	}
 
 	if err := reg.Add(wt); err != nil {
@@ -79,7 +102,7 @@ func TestRegistryLoadAndSave(t *testing.T) {
 	}
 
 	// Load registry again
-	reg2, err := Load(tempDir)
+	reg2, err := Load(tempDir, nil)
 	if err != nil {
 		t.Fatalf("Failed to load registry second time: %v", err)
 	}
@@ -106,7 +129,7 @@ func TestRegistryAddRemove(t *testing.T) {
 	}
 	defer os.RemoveAll(tempDir)
 
-	reg, err := Load(tempDir)
+	reg, err := Load(tempDir, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -155,7 +178,7 @@ func TestPortAllocation(t *testing.T) {
 	}
 	defer os.RemoveAll(tempDir)
 
-	reg, err := Load(tempDir)
+	reg, err := Load(tempDir, testConfig())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -212,7 +235,7 @@ func TestFindAvailablePort(t *testing.T) {
 	}
 	defer os.RemoveAll(tempDir)
 
-	reg, err := Load(tempDir)
+	reg, err := Load(tempDir, testConfig())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -232,5 +255,360 @@ func TestFindAvailablePort(t *testing.T) {
 	_, err = reg.FindAvailablePort("INVALID_SERVICE")
 	if err == nil {
 		t.Error("Expected error for invalid service")
+	}
+}
+
+func TestBuildPortRanges(t *testing.T) {
+	// Test with nil config (should return empty)
+	ranges := BuildPortRanges(nil)
+	if len(ranges) != 0 {
+		t.Errorf("Expected empty ranges with nil config, got %v", ranges)
+	}
+
+	// Test with configured explicit ranges
+	explicitRange := [2]int{4000, 4100}
+	workCfg := &config.WorktreeConfig{
+		EnvVariables: map[string]config.EnvVarConfig{
+			"FE_PORT": {
+				Range: &explicitRange,
+			},
+		},
+	}
+
+	ranges = BuildPortRanges(workCfg)
+	if ranges["FE_PORT"] != [2]int{4000, 4100} {
+		t.Errorf("Expected FE_PORT range [4000, 4100], got %v", ranges["FE_PORT"])
+	}
+	// BE_PORT should not be in ranges since it wasn't configured
+	if _, exists := ranges["BE_PORT"]; exists {
+		t.Errorf("BE_PORT should not exist when not configured, got %v", ranges["BE_PORT"])
+	}
+
+	// Test with port expression (no explicit range)
+	workCfg2 := &config.WorktreeConfig{
+		EnvVariables: map[string]config.EnvVarConfig{
+			"BE_PORT": {
+				Port: "9000 + {instance}",
+			},
+		},
+	}
+
+	ranges2 := BuildPortRanges(workCfg2)
+	// Should extract from expression: 9000 base + 100 range
+	if ranges2["BE_PORT"] != [2]int{9000, 9100} {
+		t.Errorf("Expected BE_PORT range [9000, 9100], got %v", ranges2["BE_PORT"])
+	}
+}
+
+func TestConfiguredPortAllocation(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "registry-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	// Create config with custom range
+	customRange := [2]int{5000, 5100}
+	workCfg := &config.WorktreeConfig{
+		EnvVariables: map[string]config.EnvVarConfig{
+			"FE_PORT": {
+				Range: &customRange,
+			},
+		},
+	}
+
+	// Load registry with config
+	reg, err := Load(tempDir, workCfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Allocate FE_PORT
+	port, err := reg.FindAvailablePort("FE_PORT")
+	if err != nil {
+		t.Fatalf("Failed to find available port: %v", err)
+	}
+
+	// Should be in configured range, not default range
+	if port < 5000 || port > 5100 {
+		t.Errorf("Port %d is outside configured range 5000-5100", port)
+	}
+	if port >= 3000 && port <= 3100 {
+		t.Errorf("Port %d is in default range, should use configured range", port)
+	}
+}
+
+func TestGetComposeProject(t *testing.T) {
+	t.Run("returns per-service compose project name", func(t *testing.T) {
+		wt := &Worktree{
+			ComposeProjects: map[string]string{
+				"backend":  "project-feature-x-backend",
+				"frontend": "project-feature-x-frontend",
+			},
+			ComposeProject: "project-feature-x",
+		}
+		if got := wt.GetComposeProject("backend"); got != "project-feature-x-backend" {
+			t.Errorf("GetComposeProject(backend) = %q, want %q", got, "project-feature-x-backend")
+		}
+		if got := wt.GetComposeProject("frontend"); got != "project-feature-x-frontend" {
+			t.Errorf("GetComposeProject(frontend) = %q, want %q", got, "project-feature-x-frontend")
+		}
+	})
+
+	t.Run("falls back to legacy ComposeProject when per-service not set", func(t *testing.T) {
+		wt := &Worktree{
+			ComposeProject: "legacy-compose-project",
+		}
+		if got := wt.GetComposeProject("backend"); got != "legacy-compose-project" {
+			t.Errorf("GetComposeProject(backend) = %q, want %q", got, "legacy-compose-project")
+		}
+	})
+
+	t.Run("falls back to legacy when service not in per-service map", func(t *testing.T) {
+		wt := &Worktree{
+			ComposeProjects: map[string]string{
+				"backend": "proj-backend",
+			},
+			ComposeProject: "legacy",
+		}
+		if got := wt.GetComposeProject("frontend"); got != "legacy" {
+			t.Errorf("GetComposeProject(frontend) = %q, want %q", got, "legacy")
+		}
+	})
+
+	t.Run("returns empty string when no compose project set", func(t *testing.T) {
+		wt := &Worktree{}
+		if got := wt.GetComposeProject("backend"); got != "" {
+			t.Errorf("GetComposeProject(backend) = %q, want empty", got)
+		}
+	})
+}
+
+func TestList(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "registry-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	reg, err := Load(tempDir, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Run("empty registry returns empty list", func(t *testing.T) {
+		list := reg.List()
+		if len(list) != 0 {
+			t.Errorf("List() on empty registry returned %d items, want 0", len(list))
+		}
+	})
+
+	t.Run("returns all worktrees", func(t *testing.T) {
+		wt1 := &Worktree{Branch: "feature/one", Normalized: "feature-one"}
+		wt2 := &Worktree{Branch: "feature/two", Normalized: "feature-two"}
+		wt3 := &Worktree{Branch: "feature/three", Normalized: "feature-three"}
+
+		reg.Add(wt1)
+		reg.Add(wt2)
+		reg.Add(wt3)
+
+		list := reg.List()
+		if len(list) != 3 {
+			t.Errorf("List() returned %d items, want 3", len(list))
+		}
+
+		// Verify all worktrees are present (order not guaranteed)
+		found := make(map[string]bool)
+		for _, wt := range list {
+			found[wt.Normalized] = true
+		}
+		for _, name := range []string{"feature-one", "feature-two", "feature-three"} {
+			if !found[name] {
+				t.Errorf("List() missing worktree %q", name)
+			}
+		}
+	})
+}
+
+func TestFindAvailablePort_Exhausted(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "registry-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	// Use a tiny 2-port range
+	tinyRange := [2]int{19998, 19999}
+	workCfg := &config.WorktreeConfig{
+		EnvVariables: map[string]config.EnvVarConfig{
+			"MY_PORT": {Range: &tinyRange},
+		},
+	}
+
+	reg, err := Load(tempDir, workCfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Allocate both ports in the registry so they appear "in use"
+	reg.Add(&Worktree{
+		Branch:     "feature/one",
+		Normalized: "feature-one",
+		Ports:      map[string]int{"MY_PORT": 19998},
+	})
+	reg.Add(&Worktree{
+		Branch:     "feature/two",
+		Normalized: "feature-two",
+		Ports:      map[string]int{"MY_PORT": 19999},
+	})
+
+	// All registry ports are taken; FindAvailablePort should fail
+	_, err = reg.FindAvailablePort("MY_PORT")
+	if err == nil {
+		t.Error("expected error when all ports in range are already allocated in registry")
+	}
+}
+
+// TestComputedVars_PersistsAcrossSaveLoad verifies that ComputedVars round-trips
+// through JSON serialisation correctly.
+func TestComputedVars_PersistsAcrossSaveLoad(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "registry-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	reg, err := Load(tempDir, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	wt := &Worktree{
+		Branch:     "feature/oauth",
+		Normalized: "feature-oauth",
+		Created:    time.Now(),
+		Projects:   []string{"backend", "frontend"},
+		Ports:      map[string]int{"FE_PORT": 3002, "BE_PORT": 8082},
+		ComputedVars: map[string]string{
+			"GOOGLE_OAUTH_REDIRECT_URI":  "http://localhost:3002/oauth/callback/google",
+			"OUTLOOK_OAUTH_REDIRECT_URI": "http://localhost:3002/oauth/callback/outlook",
+			"REACT_APP_API_BASE_URL":     "http://localhost:8082",
+		},
+	}
+
+	if err := reg.Add(wt); err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+	if err := reg.Save(); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	reg2, err := Load(tempDir, nil)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	loaded, exists := reg2.Get("feature-oauth")
+	if !exists {
+		t.Fatal("worktree not found after reload")
+	}
+
+	want := map[string]string{
+		"GOOGLE_OAUTH_REDIRECT_URI":  "http://localhost:3002/oauth/callback/google",
+		"OUTLOOK_OAUTH_REDIRECT_URI": "http://localhost:3002/oauth/callback/outlook",
+		"REACT_APP_API_BASE_URL":     "http://localhost:8082",
+	}
+	for k, wantVal := range want {
+		if got := loaded.ComputedVars[k]; got != wantVal {
+			t.Errorf("ComputedVars[%q] = %q, want %q", k, got, wantVal)
+		}
+	}
+	if len(loaded.ComputedVars) != len(want) {
+		t.Errorf("ComputedVars has %d entries, want %d: %v", len(loaded.ComputedVars), len(want), loaded.ComputedVars)
+	}
+}
+
+// TestComputedVars_NilWhenNotSet verifies that a worktree without ComputedVars
+// (legacy registry entries) deserialises without error and has a nil map.
+func TestComputedVars_NilWhenNotSet(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "registry-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	reg, err := Load(tempDir, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	wt := &Worktree{
+		Branch:     "feature/legacy",
+		Normalized: "feature-legacy",
+		Created:    time.Now(),
+		Ports:      map[string]int{"FE_PORT": 3000},
+		// ComputedVars intentionally omitted (legacy entry)
+	}
+	reg.Add(wt)
+	reg.Save()
+
+	reg2, err := Load(tempDir, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	loaded, _ := reg2.Get("feature-legacy")
+	if loaded.ComputedVars != nil && len(loaded.ComputedVars) != 0 {
+		t.Errorf("expected nil/empty ComputedVars for legacy entry, got %v", loaded.ComputedVars)
+	}
+}
+
+// TestComputedVars_UpdatedAfterPortChange simulates what start.go does:
+// it overwrites ComputedVars when the worktree is restarted and saves the registry,
+// so the new computed values are visible on the next `worktree list`.
+func TestComputedVars_UpdatedAfterPortChange(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "registry-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	reg, err := Load(tempDir, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Initial worktree with stale computed vars (port 3000 — the bug state)
+	wt := &Worktree{
+		Branch:     "feature/update",
+		Normalized: "feature-update",
+		Created:    time.Now(),
+		Ports:      map[string]int{"FE_PORT": 3001},
+		ComputedVars: map[string]string{
+			"GOOGLE_OAUTH_REDIRECT_URI": "http://localhost:3000/oauth/callback/google", // stale
+		},
+	}
+	reg.Add(wt)
+	reg.Save()
+
+	// Simulate start.go: reload registry, update ComputedVars with corrected values, save
+	reg2, err := Load(tempDir, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	loaded, _ := reg2.Get("feature-update")
+	loaded.ComputedVars = map[string]string{
+		"GOOGLE_OAUTH_REDIRECT_URI": "http://localhost:3001/oauth/callback/google", // fixed
+	}
+	reg2.Save()
+
+	// Verify the fix was persisted
+	reg3, err := Load(tempDir, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	final, _ := reg3.Get("feature-update")
+	want := "http://localhost:3001/oauth/callback/google"
+	if got := final.ComputedVars["GOOGLE_OAUTH_REDIRECT_URI"]; got != want {
+		t.Errorf("after update: GOOGLE_OAUTH_REDIRECT_URI = %q, want %q", got, want)
 	}
 }

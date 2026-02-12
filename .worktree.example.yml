@@ -1,37 +1,84 @@
 # Example .worktree.yml Configuration
 # Copy this to your project root and customize for your needs
 
-# Project definitions
-projects:
-  # Example: Backend service
-  backend:
-    dir: backend                              # Directory relative to project root
-    main_branch: main                         # Main branch name
-    start_command: "docker-compose up -d"     # Start services ({instance} placeholder)
-    migration_command: "npm run migrate"      # Run migrations (optional)
-    post_command: "npm run seed"              # Run after start (fixtures, seed data)
-    claude_working_dir: true                  # Set as Claude's working directory
+# Project namespace/prefix for Docker containers and services
+# Used in container naming: {project_name}-{feature}-{service}
+# Only alphanumeric characters and hyphens allowed, cannot start/end with hyphen
+# Examples: "myproject", "acme-app", "dev-environment"
+project_name: "myproject"
 
-  # Example: Frontend app
+# Hostname for service URLs (default: localhost)
+# Change this for remote development, tunnels (ngrok, cloudflare), or custom domains
+# Examples: "localhost", "dev.mycompany.com", "192.168.1.100"
+hostname: localhost
+
+# Project definitions
+#
+# EXECUTOR TYPES:
+#
+#   executor: docker    (default)
+#     Runs start_command synchronously (expects the command to return quickly,
+#     e.g. "docker compose up -d"). Stop uses Docker compose down.
+#
+#   executor: process
+#     Runs start_command as a background process and saves its PID to
+#     <feature-dir>/<project>.pid. Stop sends SIGTERM to the process group
+#     (SIGKILL after 5 s if needed) and removes the PID file.
+#     Use this for npm, go run, python, etc.
+#
+# Lifecycle hooks (all optional):
+#   start_pre_command    — runs before start_command
+#   start_command        — main command to start the service
+#   start_post_command   — runs after start_command (migrations, seed data, etc.)
+#   stop_pre_command     — runs before services are stopped (drain, flush, backup)
+#   stop_post_command    — runs after services are stopped (cleanup, verify)
+#   restart_pre_command  — runs before the full restart cycle (before stop)
+#   restart_post_command — runs after the full restart cycle (after start+post)
+#
+# Hook failures are non-fatal (warnings). start_command failure IS fatal.
+# Hooks triggered by command:
+#   worktree start   → start_pre → start → start_post
+#   worktree stop    → stop_pre  → [stop by executor] → stop_post
+#   worktree restart → restart_pre → (stop cycle) → (start cycle) → restart_post
+#
+projects:
+  # Example: Backend service (Docker executor — default)
+  backend:
+    executor: docker                               # Optional: "docker" is the default
+    dir: backend                                   # Directory relative to project root
+    main_branch: main                              # Main branch name
+    start_pre_command: "make check-deps"           # Optional: verify dependencies before start
+    start_command: "docker-compose up -d"          # Start services
+    start_post_command: "make migrate && make seed" # Run after start (fixtures, migrations)
+    stop_pre_command: "make drain-connections"     # Optional: graceful drain before stop
+    stop_post_command: ""                          # Optional: cleanup after stop
+    restart_pre_command: "make backup-state"       # Optional: runs before stop during restart
+    restart_post_command: "make verify-health"     # Optional: runs after start during restart
+    claude_working_dir: true                       # Set as Claude's working directory
+
+  # Example: Frontend app (process executor — no Docker needed)
   frontend:
+    executor: process                              # Start as background process, stop via PID
     dir: frontend
     main_branch: main
-    start_command: "PORT={port} npm start"    # Use {port} for dynamic ports
-    # No migrations or post_command needed
+    start_command: "npm start"
+    start_post_command: "npm run generate-types"  # Optional: generate types after start
 
-  # Example: Microservice
+  # Example: Go microservice (process executor)
   api:
+    executor: process
     dir: services/api
     main_branch: develop
-    start_command: "go run main.go --port 808{instance}"
-    migration_command: "make migrate INSTANCE={instance}"
+    start_command: "go run main.go"
+    start_post_command: "make migrate && make seed"
 
-  # Example: Worker/Queue
+  # Example: Worker/Queue (process executor)
   worker:
+    executor: process
     dir: worker
     main_branch: main
-    start_command: "python worker.py --instance {instance}"
-    post_command: "python seed_jobs.py"
+    start_command: "python worker.py"
+    start_post_command: "python seed_jobs.py"
 
 # Preset configurations
 presets:
@@ -53,110 +100,393 @@ presets:
 # Default preset
 default_preset: fullstack
 
-# Maximum instances (0-N)
-max_instances: 5
+# NOTE: Feature-based worktrees use dynamic port allocation via registry
+# No instance limits - unlimited features supported
 
-# Auto-run migrations
-auto_migrations: true
-
-# Auto-run post-commands (fixtures, seed)
+# Auto-run post-commands (fixtures, seed, migrations)
 auto_fixtures: true
 
-# Port/Service display configuration
-# Customize what services are shown after setup
-ports:
-  # Frontend example
+# Files/directories to symlink from project root into each worktree
+# Useful for sharing configuration, .claude, node_modules, vendor directories, etc.
+symlinks:
+  - source: ".claude"          # Share Claude configuration
+    target: ".claude"
+  # - source: ".env.shared"    # Share environment variables
+  #   target: ".env.shared"
+  # - source: "node_modules"   # Share node_modules (careful with path conflicts)
+  #   target: "node_modules"
+
+# Files/directories to copy from project root into each worktree
+# Useful for template files that should be customized per worktree
+copies:
+  # - source: ".env.template"  # Copy template and customize per worktree
+  #   target: ".env"
+  # - source: "config.example.yml"
+  #   target: "config.yml"
+
+# Generated files (auto-created/updated by worktree manager in each worktree)
+# These files are created with templated content that uses port placeholders
+generated_files:
   frontend:
+    - path: ".env.development.local"
+      template: |
+        # Auto-generated by worktree manager - DO NOT EDIT MANUALLY
+        # This file will be regenerated when the worktree is started
+        REACT_APP_API_BASE_URL=http://localhost:{BE_PORT}
+        WDS_SOCKET_PORT={FE_PORT}
+
+# Environment variable configuration (single source of truth)
+# Defines all environment variables exported to start_command and post_command.
+# Entries can be: allocated ports (with range), calculated values (port expression
+# without range), string templates (with value field), or display-only (env: null).
+#
+# ENTRY TYPES:
+#
+# 1. Allocated port — dynamically assigned from a range, no conflicts across instances:
+#    MY_PORT:
+#      name: "My Service"          # Display name (set to null to hide)
+#      url: "http://{host}:{port}" # URL template (set to null to hide)
+#      port: "3000"                # Base port hint
+#      env: "MY_PORT"              # Exported env var name (key = identifier only)
+#      range: [3000, 3100]         # Allocation range (required for allocation)
+#
+# 2. Calculated port — derived from {instance}, NOT allocated from a range:
+#    MY_EXT_PORT:
+#      port: "4510 + {instance} * 50"  # Calculated, not allocated
+#      env: "MY_EXT_PORT"
+#      # NO range field
+#
+#    PORT EXPRESSION SYNTAX:
+#    - Simple offset:    "3000 + {instance}"       → 3000, 3001, 3002, ...
+#    - Multiplication:   "4510 + {instance} * 50"  → 4510, 4560, 4610, ...
+#    - Static value:     "8080"                     → always 8080
+#
+# 3. String template — non-port env var, may reference allocated ports as {VAR_NAME}:
+#    MY_API_URL:
+#      value: "http://localhost:{BE_PORT}"
+#      env: "MY_API_URL"
+#
+# 4. Display-only — shown in UI but not exported (env: null):
+#    swagger:
+#      name: "Swagger"
+#      url: "http://{host}:{port}/docs"
+#      port: "8080"
+#      env: null
+#
+# RULES:
+# - Keys are identifiers only; the env field controls the actual variable name
+# - Entries with range are allocated (registry prevents conflicts between instances)
+# - Entries without range are calculated only (no conflict protection)
+# - Set name/url to null to suppress display in the UI
+#
+env_variables:
+  # ── Allocated ports ────────────────────────────────────────────────────────
+
+  FE_PORT:
     name: "Frontend"
-    url: "http://localhost:{port}"
-    port: "3000 + {instance}"    # Expression: base + instance
+    url: "http://{host}:{port}"
+    port: "3000"
+    env: "FE_PORT"
+    range: [3000, 3100]
 
-  # Backend API
-  backend:
+  BE_PORT:
     name: "Backend API"
-    url: "http://localhost:{port}"
-    port: "8080 + {instance}"
+    url: "http://{host}:{port}"
+    port: "8080"
+    env: "BE_PORT"
+    range: [8080, 8180]
 
-  # API documentation (Swagger, ReDoc, etc.)
-  docs:
-    name: "API Docs"
-    url: "http://localhost:{port}/docs"
-    port: "8080 + {instance}"
-
-  # Database examples
-  postgres:
+  POSTGRES_PORT:
     name: "PostgreSQL"
-    url: "localhost:{port}"
-    port: "5432 + {instance}"
+    url: "{host}:{port}"
+    port: "5432"
+    env: "POSTGRES_PORT"
+    range: [5432, 5532]
 
-  mysql:
-    name: "MySQL"
-    url: "localhost:{port}"
-    port: "3306 + {instance}"
+  MYSQL_PORT:
+    name: null
+    url: null
+    port: "3306"
+    env: "MYSQL_PORT"
+    range: [3306, 3406]
 
-  mongo:
-    name: "MongoDB"
-    url: "mongodb://localhost:{port}"
-    port: "27017 + {instance}"
+  MONGO_PORT:
+    name: null
+    url: null
+    port: "27017"
+    env: "MONGO_PORT"
+    range: [27017, 27117]
 
-  redis:
-    name: "Redis"
-    url: "redis://localhost:{port}"
-    port: "6379 + {instance}"
+  REDIS_PORT:
+    name: null
+    url: null
+    port: "6379"
+    env: "REDIS_PORT"
+    range: [6379, 6479]
 
-  # Message queues
-  rabbitmq:
+  RABBITMQ_PORT:
     name: "RabbitMQ"
-    url: "http://localhost:{port}"
-    port: "15672 + {instance}"    # Management UI
+    url: "http://{host}:{port}"
+    port: "15672"
+    env: "RABBITMQ_PORT"
+    range: [15672, 15772]
 
-  kafka:
-    name: "Kafka"
-    url: "localhost:{port}"
-    port: "9092 + {instance}"
+  KAFKA_PORT:
+    name: null
+    url: null
+    port: "9092"
+    env: "KAFKA_PORT"
+    range: [9092, 9192]
 
-  # Monitoring & Debugging
-  grafana:
+  GRAFANA_PORT:
     name: "Grafana"
-    url: "http://localhost:{port}"
-    port: "3001 + {instance}"
+    url: "http://{host}:{port}"
+    port: "3001"
+    env: "GRAFANA_PORT"
+    range: [3001, 3101]
 
-  prometheus:
+  PROMETHEUS_PORT:
     name: "Prometheus"
-    url: "http://localhost:{port}"
-    port: "9090 + {instance}"
+    url: "http://{host}:{port}"
+    port: "9090"
+    env: "PROMETHEUS_PORT"
+    range: [9090, 9190]
 
-  jaeger:
-    name: "Jaeger"
-    url: "http://localhost:{port}"
-    port: "16686 + {instance}"
+  MAILPIT_SMTP_PORT:
+    name: null
+    url: null
+    port: "1025"
+    env: "MAILPIT_SMTP_PORT"
+    range: [1025, 1125]
 
-  # Development tools
-  mailcatcher:
-    name: "Mail"
-    url: "http://localhost:{port}"
-    port: "1080 + {instance}"
+  MAILPIT_UI_PORT:
+    name: "Mailpit UI"
+    url: "http://{host}:{port}"
+    port: "8025"
+    env: "MAILPIT_UI_PORT"
+    range: [8025, 8125]
 
-  adminer:
-    name: "Adminer"
-    url: "http://localhost:{port}"
-    port: "8080 + {instance}"
-
-  # AWS LocalStack
-  localstack:
+  LOCALSTACK_PORT:
     name: "LocalStack"
-    url: "http://localhost:{port}"
-    port: "4566 + {instance}"
+    url: "http://{host}:{port}"
+    port: "4566"
+    env: "LOCALSTACK_PORT"
+    range: [4566, 4666]
 
-  # gRPC services
-  grpc:
-    name: "gRPC"
-    url: "localhost:{port}"
-    port: "50051 + {instance}"
+  GRPC_PORT:
+    name: null
+    url: null
+    port: "50051"
+    env: "GRPC_PORT"
+    range: [50051, 50151]
 
-# Notes:
-# - {instance} is replaced with the instance number (0, 1, 2, etc.)
-# - {port} is calculated from the port expression
-# - Port expressions support: "base + {instance}" format
-# - Only configured ports are displayed (remove unused services)
-# - Services are shown in the order defined here
+  # ── Calculated ports (no range — not allocated, derived from {instance}) ───
+  # Use when a service needs a block of ports per instance (e.g. LocalStack ext).
+  # instance 0 → 4510–4559, instance 1 → 4560–4609, instance 2 → 4610–4659
+
+  LOCALSTACK_EXT_START:
+    name: null
+    url: null
+    port: "4510 + {instance} * 50"
+    env: "LOCALSTACK_EXT_START"
+
+  LOCALSTACK_EXT_END:
+    name: null
+    url: null
+    port: "4559 + {instance} * 50"
+    env: "LOCALSTACK_EXT_END"
+
+  # ── String templates ────────────────────────────────────────────────────────
+
+  COMPOSE_PROJECT_NAME:
+    name: null
+    url: null
+    value: "{project}-{feature}-{service}"
+    env: "COMPOSE_PROJECT_NAME"
+
+  # ── Display-only ────────────────────────────────────────────────────────────
+  # Shown in the UI; env: null means not exported as an environment variable.
+
+  swagger:
+    name: "Swagger"
+    url: "http://{host}:{port}/docs/api/index.html"
+    port: "8080"
+    env: null                           # Uses BE_PORT; display only
+
+# NOTES:
+#
+# 1. PORT ALLOCATION:
+#    - Only entries with range are allocated; registry prevents conflicts between instances
+#    - Entries without range are calculated on-the-fly (no conflict protection)
+#
+# 2. ADDING NEW SERVICES:
+#    - Allocated port:    add port + env + range
+#    - Calculated value:  add port expression (with {instance}), env, no range
+#    - String template:   add value (with {PLACEHOLDER}), env, no port/range
+#
+# 3. VALIDATION:
+#    - Use 'worktree doctor' to check for port conflicts
+#    - Use 'worktree ports' to see all allocations
+#
+# 4. MIGRATION FROM HARDCODED PORTS:
+#    - Replace hardcoded ports in docker-compose.yml with ${ENV_VAR_NAME}
+#    - Update scripts to use environment variables
+#    - Test with 'worktree new-feature' to verify allocation works
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# SCHEDULED AGENTS - Automated Maintenance Tasks
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+#
+# Scheduled agents automate maintenance tasks like security updates, dependency
+# updates, code quality checks, and more.
+#
+# SCHEDULER OPTIONS:
+#
+# 1. Built-in Go Scheduler (Recommended):
+#    worktree agent daemon               # Run in foreground
+#    worktree agent install-service      # Install as system service
+#
+# 2. OS Schedulers (Alternative):
+#    worktree agent schedule <task>      # Generate cron/launchd config
+#
+# CRON EXPRESSION FORMAT (5 fields):
+# ┌───────────── minute (0-59)
+# │ ┌───────────── hour (0-23)
+# │ │ ┌───────────── day of month (1-31)
+# │ │ │ ┌───────────── month (1-12)
+# │ │ │ │ ┌───────────── day of week (0-6) (Sunday=0)
+# │ │ │ │ │
+# * * * * *
+#
+# Examples:
+# - "0 9 * * MON"     = Every Monday at 9:00 AM
+# - "0 0 1 * *"       = First day of month at midnight
+# - "*/15 * * * *"    = Every 15 minutes
+#
+# See full documentation: tools/worktree-manager/AGENTS.md
+#
+scheduled_agents:
+  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  # Example: NPM Security Audit & Fix
+  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  npm-audit:
+    name: "NPM Security Audit & Fix"
+    description: "Check and fix npm vulnerabilities in frontend"
+    schedule: "0 9 * * MON"  # Every Monday at 9:00 AM
+
+    context:
+      preset: frontend      # Which projects to work on
+      branch: main         # Base branch
+      instance: 91         # Instance number (use 90-99 for agents)
+      yolo: true           # Autonomous mode (no confirmations)
+
+    steps:
+      - name: "Run npm audit fix"
+        type: shell
+        command: "npm audit fix --audit-level=moderate"
+        working_dir: "frontend"
+
+      - name: "Update package-lock.json"
+        type: shell
+        command: "npm install"
+        working_dir: "frontend"
+
+    safety:
+      gates:
+        - name: "Lint check"
+          command: "cd frontend && npm run lint"
+          required: true              # Blocks commit if fails
+
+        - name: "Build check"
+          command: "cd frontend && npm run build"
+          required: true
+
+        - name: "Unit tests"
+          command: "cd frontend && npm test -- --watchAll=false"
+          required: false             # Warns only if fails
+
+      git:
+        branch: "automated/npm-audit-{date}"
+        commit_message: |
+          chore: npm audit fix
+
+          Automated security fixes from npm audit.
+
+          Co-Authored-By: Worktree Manager Agent <noreply@example.com>
+        push:
+          enabled: true
+          create_pr: true
+          pr_title: "Security: NPM Audit Fixes ({date})"
+          pr_body: |
+            ## Automated NPM Audit Fixes
+
+            Quality gates: Lint ✅ | Build ✅ | Tests ⚠️ (optional)
+
+            Review and merge if all checks pass.
+          auto_merge: false
+
+      rollback:
+        enabled: true
+        strategy: "cleanup-worktree"
+
+    notifications:
+      on_failure:
+        - type: gitlab_issue
+          project: "myproject/frontend"
+          title: "NPM Audit: Failed ({date})"
+          labels: ["security", "automated", "failed"]
+
+  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  # Example: Go Dependencies Update
+  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  go-deps-update:
+    name: "Go Dependencies Update"
+    description: "Update Go dependencies in backend"
+    schedule: "0 10 * * MON"  # Every Monday at 10:00 AM
+
+    context:
+      preset: backend
+      branch: main
+      instance: 92
+      yolo: true
+
+    steps:
+      - name: "Update dependencies"
+        type: shell
+        command: "go get -u ./... && go mod tidy"
+        working_dir: "backend"
+
+    safety:
+      gates:
+        - name: "Go vet"
+          command: "cd backend && go vet ./..."
+          required: true
+        - name: "Unit tests"
+          command: "cd backend && make test-unit"
+          required: true
+
+      git:
+        branch: "automated/go-deps-{date}"
+        commit_message: "chore: update Go dependencies"
+        push:
+          enabled: true
+          create_pr: true
+          pr_title: "Dependencies: Go Update ({date})"
+          auto_merge: false
+
+      rollback:
+        enabled: true
+        strategy: "cleanup-worktree"
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# AGENT MANAGEMENT COMMANDS
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+#
+# worktree agent list                      # List all configured agents
+# worktree agent validate <name>           # Validate configuration
+# worktree agent run <name>                # Run manually (testing)
+# worktree agent daemon                    # Start scheduler daemon
+# worktree agent install-service           # Install as system service
+#
+# Documentation: tools/worktree-manager/AGENTS.md
+#

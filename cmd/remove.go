@@ -6,11 +6,11 @@ import (
 	"os"
 	"strings"
 
-	"worktree/pkg/config"
-	"worktree/pkg/docker"
-	"worktree/pkg/git"
-	"worktree/pkg/registry"
-	"worktree/pkg/ui"
+	"github.com/braunmar/worktree/pkg/config"
+	"github.com/braunmar/worktree/pkg/docker"
+	"github.com/braunmar/worktree/pkg/git"
+	"github.com/braunmar/worktree/pkg/registry"
+	"github.com/braunmar/worktree/pkg/ui"
 
 	"github.com/spf13/cobra"
 )
@@ -20,9 +20,13 @@ var (
 )
 
 var removeCmd = &cobra.Command{
-	Use:   "remove <feature-name>",
+	Use:   "remove <feature-name-or-branch>",
 	Short: "Remove a feature worktree",
 	Long: `Remove git worktrees for a feature and update the registry.
+
+The feature name/branch is automatically normalized, so you can use either:
+- The normalized feature name: feature-user-auth
+- The original branch name: feature/user-auth
 
 This command performs safety checks:
 - Warns if feature is still running
@@ -30,9 +34,10 @@ This command performs safety checks:
 - Prompts for confirmation (unless --force is used)
 - Removes from registry
 
-Example:
-  worktree remove feature-user-auth
-  worktree remove feature-reports --force`,
+Examples:
+  worktree remove feature-user-auth           # Using normalized name
+  worktree remove feature/user-auth           # Using branch name
+  worktree remove feature/reports --force`,
 	Args: cobra.ExactArgs(1),
 	Run:  runRemove,
 }
@@ -42,15 +47,36 @@ func init() {
 }
 
 func runRemove(cmd *cobra.Command, args []string) {
-	featureName := args[0]
+	input := args[0]
+	verbose, _ := cmd.Flags().GetBool("verbose")
+
+	// Normalize the input to match behavior of new-feature command
+	// This allows users to use either the normalized name or the original branch name
+	featureName := registry.NormalizeBranchName(input)
+	if verbose {
+		ui.Info(fmt.Sprintf("Normalized input '%s' to feature name '%s'", input, featureName))
+	}
 
 	// Get configuration
 	cfg, err := config.New()
 	checkError(err)
+	if verbose {
+		ui.Info(fmt.Sprintf("Loaded configuration from: %s", cfg.ProjectRoot))
+	}
+
+	// Load worktree configuration
+	workCfg, err := config.LoadWorktreeConfig(cfg.ProjectRoot)
+	checkError(err)
+	if verbose {
+		ui.Info(fmt.Sprintf("Loaded worktree configuration with %d projects", len(workCfg.Projects)))
+	}
 
 	// Load registry
-	reg, err := registry.Load(cfg.WorktreeDir)
+	reg, err := registry.Load(cfg.WorktreeDir, workCfg)
 	checkError(err)
+	if verbose {
+		ui.Info(fmt.Sprintf("Loaded registry with %d worktrees", len(reg.Worktrees)))
+	}
 
 	// Get worktree from registry
 	wt, exists := reg.Get(featureName)
@@ -81,53 +107,98 @@ func runRemove(cmd *cobra.Command, args []string) {
 		os.Exit(0)
 	}
 
-	// Get worktree paths
-	backendWorktree := cfg.WorktreeBackendPath(featureName)
-	frontendWorktree := cfg.WorktreeFrontendPath(featureName)
-
-	backendBranch, _ := git.GetWorktreeBranch(backendWorktree)
-	frontendBranch, _ := git.GetWorktreeBranch(frontendWorktree)
-
 	// Display header
 	ui.Warning(fmt.Sprintf("Removing Feature: %s", featureName))
 	ui.NewLine()
 	ui.PrintStatusLine("Branch", wt.Branch)
-	ui.PrintStatusLine("Backend", fmt.Sprintf("worktrees/%s/backend (branch: %s)", featureName, backendBranch))
-	ui.PrintStatusLine("Frontend", fmt.Sprintf("worktrees/%s/frontend (branch: %s)", featureName, frontendBranch))
+
+	// Get list of projects from the worktree
+	projects := wt.Projects
+	if len(projects) == 0 {
+		ui.Error("No projects found in worktree")
+		os.Exit(1)
+	}
+
+	featureDir := cfg.WorktreeFeaturePath(featureName)
+
+	// Display each project's worktree information
+	for _, projectName := range projects {
+		project, exists := workCfg.Projects[projectName]
+		if !exists {
+			ui.Warning(fmt.Sprintf("Project '%s' not found in configuration", projectName))
+			continue
+		}
+
+		worktreePath := featureDir + "/" + project.Dir
+		branch, _ := git.GetWorktreeBranch(worktreePath)
+		ui.PrintStatusLine(projectName, fmt.Sprintf("worktrees/%s/%s (branch: %s)", featureName, project.Dir, branch))
+	}
+
+	// Display compose project names (supports both old and new format)
+	if len(wt.ComposeProjects) > 0 {
+		for project, composeName := range wt.ComposeProjects {
+			ui.PrintStatusLine(fmt.Sprintf("Compose (%s)", project), composeName)
+		}
+	} else if wt.ComposeProject != "" {
+		ui.PrintStatusLine("Compose Project", wt.ComposeProject)
+	}
 	ui.NewLine()
 
-	// Check if feature is running
-	if docker.IsFeatureRunning(featureName) && !forceRemove {
-		ui.Warning(fmt.Sprintf("Feature '%s' is currently running. Stop it first? [y/N]: ", featureName))
-		reader := bufio.NewReader(os.Stdin)
-		response, _ := reader.ReadString('\n')
-		response = strings.TrimSpace(strings.ToLower(response))
+	// Always stop services before removing (prevents stale containers)
+	ui.Info("Stopping services (if running)...")
+	featurePath := cfg.WorktreeFeaturePath(featureName)
 
-		if response == "y" || response == "yes" {
-			ui.Loading(fmt.Sprintf("Stopping feature %s...", featureName))
-			featurePath := cfg.WorktreeFeaturePath(featureName)
-			if err := docker.StopFeature(featureName, featurePath); err != nil {
-				ui.Error(fmt.Sprintf("Failed to stop feature: %v", err))
-				os.Exit(1)
+	// Build map of project directory to compose project name
+	projectInfo := make(map[string]string)
+	for _, projectName := range projects {
+		if projectCfg, exists := workCfg.Projects[projectName]; exists {
+			// Get the compose project name for this project from registry
+			composeName := wt.GetComposeProject(projectName)
+			if composeName == "" {
+				// Fallback to default naming if not in registry
+				composeName = fmt.Sprintf("%s-%s-%s", workCfg.ProjectName, featureName, projectName)
 			}
-			ui.Success("Feature stopped")
-			ui.NewLine()
+			projectInfo[projectCfg.Dir] = composeName
 		}
 	}
 
-	// Check for uncommitted changes
-	backendChanges, _ := git.HasUncommittedChanges(backendWorktree)
-	frontendChanges, _ := git.HasUncommittedChanges(frontendWorktree)
+	if err := docker.StopFeature(workCfg.ProjectName, featureName, featurePath, projectInfo); err != nil {
+		ui.Warning(fmt.Sprintf("Failed to stop services: %v", err))
+		ui.Info("Continuing with removal...")
+	} else {
+		ui.CheckMark("Services stopped")
+	}
+	ui.NewLine()
 
-	if (backendChanges || frontendChanges) && !forceRemove {
-		ui.Warning("Uncommitted changes detected:")
-		if backendChanges {
-			count, _ := git.GetUncommittedChangesCount(backendWorktree)
-			ui.PrintStatusLine("Backend", fmt.Sprintf("%d uncommitted changes", count))
+	// Check for uncommitted changes in all projects
+	hasUncommittedChanges := false
+	uncommittedProjects := []string{}
+
+	for _, projectName := range projects {
+		project, exists := workCfg.Projects[projectName]
+		if !exists {
+			continue
 		}
-		if frontendChanges {
-			count, _ := git.GetUncommittedChangesCount(frontendWorktree)
-			ui.PrintStatusLine("Frontend", fmt.Sprintf("%d uncommitted changes", count))
+
+		worktreePath := featureDir + "/" + project.Dir
+
+		// Check if worktree exists
+		if _, err := os.Stat(worktreePath); os.IsNotExist(err) {
+			continue
+		}
+
+		changes, _ := git.HasUncommittedChanges(worktreePath)
+		if changes {
+			hasUncommittedChanges = true
+			count, _ := git.GetUncommittedChangesCount(worktreePath)
+			uncommittedProjects = append(uncommittedProjects, fmt.Sprintf("%s: %d uncommitted changes", projectName, count))
+		}
+	}
+
+	if hasUncommittedChanges && !forceRemove {
+		ui.Warning("Uncommitted changes detected:")
+		for _, msg := range uncommittedProjects {
+			ui.PrintStatusLine("", msg)
 		}
 		ui.NewLine()
 	}
@@ -145,30 +216,44 @@ func runRemove(cmd *cobra.Command, args []string) {
 		}
 	}
 
-	// Remove worktrees
+	// Remove worktrees for all projects
 	ui.NewLine()
 	ui.Loading("Removing worktrees...")
 
-	// Remove backend worktree
-	if err := git.RemoveWorktree(cfg.BackendDir, backendWorktree); err != nil {
-		ui.Error(fmt.Sprintf("Failed to remove backend worktree: %v", err))
-	} else {
-		ui.CheckMark("Removed backend worktree")
+	for _, projectName := range projects {
+		project, exists := workCfg.Projects[projectName]
+		if !exists {
+			continue
+		}
+
+		projectDir := cfg.ProjectRoot + "/" + project.Dir
+		worktreePath := featureDir + "/" + project.Dir
+
+		// Check if worktree exists before trying to remove
+		if _, err := os.Stat(worktreePath); os.IsNotExist(err) {
+			ui.Warning(fmt.Sprintf("Worktree for %s does not exist, skipping", projectName))
+			continue
+		}
+
+		if err := git.RemoveWorktree(projectDir, worktreePath); err != nil {
+			ui.Error(fmt.Sprintf("Failed to remove %s worktree: %v", projectName, err))
+		} else {
+			ui.CheckMark(fmt.Sprintf("Removed %s worktree", projectName))
+		}
 	}
 
-	// Remove frontend worktree
-	if err := git.RemoveWorktree(cfg.FrontendDir, frontendWorktree); err != nil {
-		ui.Error(fmt.Sprintf("Failed to remove frontend worktree: %v", err))
-	} else {
-		ui.CheckMark("Removed frontend worktree")
-	}
+	// Prune worktree metadata for all projects
+	for _, projectName := range projects {
+		project, exists := workCfg.Projects[projectName]
+		if !exists {
+			continue
+		}
 
-	// Prune worktree metadata
-	git.PruneWorktrees(cfg.BackendDir)
-	git.PruneWorktrees(cfg.FrontendDir)
+		projectDir := cfg.ProjectRoot + "/" + project.Dir
+		git.PruneWorktrees(projectDir)
+	}
 
 	// Remove feature directory
-	featureDir := cfg.WorktreeFeaturePath(featureName)
 	if err := os.RemoveAll(featureDir); err != nil {
 		ui.Warning(fmt.Sprintf("Failed to remove feature directory: %v", err))
 	} else {

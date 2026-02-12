@@ -5,8 +5,8 @@ import (
 	"os"
 	"os/exec"
 
-	"worktree/pkg/config"
-	"worktree/pkg/ui"
+	"github.com/braunmar/worktree/pkg/config"
+	"github.com/braunmar/worktree/pkg/ui"
 
 	"github.com/spf13/cobra"
 )
@@ -14,10 +14,11 @@ import (
 var stopAllCmd = &cobra.Command{
 	Use:   "stop-all",
 	Short: "Stop all running instances",
-	Long: `Stop all running instances (0-5).
+	Long: `Stop all running instances.
 
 This command:
-1. Executes 'make down-all' in the backend directory
+1. Executes 'make down-all' in the main project directory
+   (uses first configured project or project with claude_working_dir: true)
 2. Shows status
 
 Example:
@@ -31,13 +32,36 @@ func runStopAll(cmd *cobra.Command, args []string) {
 	cfg, err := config.New()
 	checkError(err)
 
+	// Load worktree configuration
+	workCfg, err := config.LoadWorktreeConfig(cfg.ProjectRoot)
+	checkError(err)
+
+	// Determine which project to use for the stop-all command
+	// Prefer the claude working directory project, or use first project
+	projectName := workCfg.GetClaudeWorkingProject()
+	if projectName == "" {
+		// Fallback to first project if no claude working dir configured
+		for name := range workCfg.Projects {
+			projectName = name
+			break
+		}
+	}
+
+	if projectName == "" {
+		ui.Error("No projects configured")
+		os.Exit(1)
+	}
+
+	project := workCfg.Projects[projectName]
+	projectDir := cfg.ProjectRoot + "/" + project.Dir
+
 	// Display header
-	ui.Warning("Stopping all instances...")
+	ui.Warning(fmt.Sprintf("Stopping all instances (using %s)...", projectName))
 	ui.NewLine()
 
-	// Execute make down-all in backend directory
+	// Execute make down-all in project directory
 	makeCmd := exec.Command("make", "down-all")
-	makeCmd.Dir = cfg.BackendDir
+	makeCmd.Dir = projectDir
 	makeCmd.Stdout = os.Stdout
 	makeCmd.Stderr = os.Stderr
 

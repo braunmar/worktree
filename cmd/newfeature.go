@@ -4,26 +4,29 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strings"
 	"time"
 
-	"worktree/pkg/config"
-	"worktree/pkg/git"
-	"worktree/pkg/registry"
-	"worktree/pkg/ui"
+	"github.com/braunmar/worktree/pkg/config"
+	"github.com/braunmar/worktree/pkg/docker"
+	"github.com/braunmar/worktree/pkg/git"
+	"github.com/braunmar/worktree/pkg/registry"
+	"github.com/braunmar/worktree/pkg/ui"
 
 	"github.com/spf13/cobra"
 )
 
 var (
-	preset         string
-	noFixturesNF   bool
-	noMigrationsNF bool
+	preset       string
+	noFixturesNF bool
+	dryRun       bool
+	yoloModeNF   bool
 )
 
 var newFeatureCmd = &cobra.Command{
 	Use:   "new-feature <branch> [preset]",
 	Short: "Create and start a complete feature development environment",
-	Long: `Create worktrees, start services, run migrations, and navigate Claude to the working directory.
+	Long: `Create worktrees, start services, and navigate Claude to the working directory.
 
 This is a one-command setup for feature development that:
 1. Reads configuration from .worktree.yml
@@ -31,22 +34,23 @@ This is a one-command setup for feature development that:
 3. Dynamically allocates ports from available ranges
 4. Creates git worktrees for all projects in the preset
 5. Starts services (backend, frontend, etc.)
-6. Runs migrations (if configured)
-7. Runs fixtures (if configured)
-8. Navigates Claude to the backend worktree
+6. Runs post-startup commands (if configured)
+7. Navigates Claude to the backend worktree
 
 Examples:
   worktree new-feature feature/user-auth              # Use default preset
   worktree new-feature feature/reports fullstack      # Use fullstack preset
   worktree new-feature feature/api backend            # Backend only
-  worktree new-feature feature/ui --no-fixtures       # Skip fixtures`,
+  worktree new-feature feature/ui --no-fixtures       # Skip fixtures
+  worktree new-feature feature/coverage --yolo        # Enable YOLO mode`,
 	Args: cobra.RangeArgs(1, 2),
 	Run:  runNewFeature,
 }
 
 func init() {
 	newFeatureCmd.Flags().BoolVar(&noFixturesNF, "no-fixtures", false, "skip running fixtures")
-	newFeatureCmd.Flags().BoolVar(&noMigrationsNF, "no-migrations", false, "skip running migrations")
+	newFeatureCmd.Flags().BoolVar(&dryRun, "dry-run", false, "preview changes without creating anything")
+	newFeatureCmd.Flags().BoolVar(&yoloModeNF, "yolo", false, "enable YOLO mode (Claude works autonomously)")
 }
 
 func runNewFeature(cmd *cobra.Command, args []string) {
@@ -56,16 +60,27 @@ func runNewFeature(cmd *cobra.Command, args []string) {
 		presetName = args[1]
 	}
 
+	verbose, _ := cmd.Flags().GetBool("verbose")
+
 	// Normalize branch name to feature name
 	featureName := registry.NormalizeBranchName(branch)
+	if verbose {
+		ui.Info(fmt.Sprintf("Normalized branch '%s' to feature name '%s'", branch, featureName))
+	}
 
 	// Get configuration
 	cfg, err := config.New()
 	checkError(err)
+	if verbose {
+		ui.Info(fmt.Sprintf("Loaded configuration from: %s", cfg.ProjectRoot))
+	}
 
 	// Load worktree configuration
 	workCfg, err := config.LoadWorktreeConfig(cfg.ProjectRoot)
 	checkError(err)
+	if verbose {
+		ui.Info(fmt.Sprintf("Loaded worktree configuration with %d projects", len(workCfg.Projects)))
+	}
 
 	// Get preset
 	presetCfg, err := workCfg.GetPreset(presetName)
@@ -86,22 +101,41 @@ func runNewFeature(cmd *cobra.Command, args []string) {
 	}
 
 	// Load registry
-	reg, err := registry.Load(cfg.WorktreeDir)
+	reg, err := registry.Load(cfg.WorktreeDir, workCfg)
 	checkError(err)
+	if verbose {
+		ui.Info(fmt.Sprintf("Loaded registry from: %s", cfg.WorktreeDir))
+		ui.Info(fmt.Sprintf("Found %d existing worktrees", len(reg.Worktrees)))
+	}
 
 	// Allocate ports for all services
 	ui.Section("Allocating ports...")
-	services := []string{"FE_PORT", "BE_PORT", "POSTGRES_PORT", "MAILPIT_SMTP_PORT", "MAILPIT_UI_PORT", "LOCALSTACK_PORT"}
+	services := workCfg.GetPortServiceNames()
+	if verbose {
+		ui.Info(fmt.Sprintf("Services requiring ports: %v", services))
+	}
 	ports, err := reg.AllocatePorts(services)
 	checkError(err)
+	if verbose {
+		ui.Info(fmt.Sprintf("Allocated ports: %v", ports))
+	}
+
+	// Calculate INSTANCE from allocated APP_PORT (base port is 8080)
+	appPortCfg := workCfg.EnvVariables["APP_PORT"]
+	basePort, err := config.ExtractBasePort(appPortCfg.Port)
+	checkError(err)
+	instance := ports["APP_PORT"] - basePort
 
 	// Display allocated ports
-	ui.CheckMark("Ports allocated:")
-	ui.PrintStatusLine("  Frontend", fmt.Sprintf("http://localhost:%d", ports["FE_PORT"]))
-	ui.PrintStatusLine("  Backend", fmt.Sprintf("http://localhost:%d", ports["BE_PORT"]))
-	ui.PrintStatusLine("  PostgreSQL", fmt.Sprintf("localhost:%d", ports["POSTGRES_PORT"]))
-	ui.PrintStatusLine("  Mailpit UI", fmt.Sprintf("http://localhost:%d", ports["MAILPIT_UI_PORT"]))
+	ui.CheckMark("Ports allocated")
+	ui.Info(fmt.Sprintf("Instance: %d", instance))
 	ui.NewLine()
+
+	// If dry-run, display preview and exit
+	if dryRun {
+		displayDryRunPreview(featureName, instance, ports, workCfg, presetCfg, cfg)
+		os.Exit(0)
+	}
 
 	// Create feature directory
 	featureDir := cfg.WorktreeFeaturePath(featureName)
@@ -118,6 +152,10 @@ func runNewFeature(cmd *cobra.Command, args []string) {
 		projectDir := cfg.ProjectRoot + "/" + project.Dir
 		worktreePath := featureDir + "/" + project.Dir
 
+		if verbose {
+			ui.Info(fmt.Sprintf("Git worktree command: git worktree add %s %s", worktreePath, branch))
+		}
+
 		if err := git.CreateWorktree(projectDir, worktreePath, branch); err != nil {
 			checkError(fmt.Errorf("failed to create %s worktree: %w", projectName, err))
 		}
@@ -125,48 +163,104 @@ func runNewFeature(cmd *cobra.Command, args []string) {
 	}
 	ui.NewLine()
 
-	// Create single .claude symlink at worktree root
-	ui.Section("Setting up Claude configuration...")
-	claudeSymlink := featureDir + "/.claude"
+	// Create symlinks from configuration
+	if len(workCfg.Symlinks) > 0 {
+		ui.Section("Creating symlinks...")
+		// Calculate relative path from worktree to project root
+		// worktrees/feature-name -> ../..
+		relPathToRoot := config.CalculateRelativePath(2) // 2 levels: worktrees/feature-name
 
-	// Calculate relative path from worktree to root .claude
-	// worktrees/feature-name/.claude -> ../../.claude
-	relPath := "../../.claude"
+		for _, link := range workCfg.Symlinks {
+			sourcePath := relPathToRoot + "/" + link.Source
+			targetPath := featureDir + "/" + link.Target
 
-	// Check if .claude already exists
-	if info, err := os.Lstat(claudeSymlink); err == nil {
-		// If it's a symlink, remove it
-		if info.Mode()&os.ModeSymlink != 0 {
-			if err := os.Remove(claudeSymlink); err != nil {
-				ui.Warning(fmt.Sprintf("Failed to remove existing symlink: %v", err))
+			// Check if target already exists
+			if info, err := os.Lstat(targetPath); err == nil {
+				// If it's a symlink, remove it
+				if info.Mode()&os.ModeSymlink != 0 {
+					if err := os.Remove(targetPath); err != nil {
+						ui.Warning(fmt.Sprintf("Failed to remove existing symlink %s: %v", link.Target, err))
+						continue
+					}
+				} else {
+					// If it's a directory or file, back it up and remove
+					backupPath := targetPath + ".backup." + time.Now().Format("20060102-150405")
+					if err := os.Rename(targetPath, backupPath); err != nil {
+						ui.Warning(fmt.Sprintf("Failed to backup existing %s: %v", link.Target, err))
+						continue
+					} else {
+						ui.Info(fmt.Sprintf("Backed up existing %s", link.Target))
+					}
+				}
 			}
-		} else {
-			// If it's a directory or file, back it up and remove
-			backupPath := claudeSymlink + ".backup." + time.Now().Format("20060102-150405")
-			if err := os.Rename(claudeSymlink, backupPath); err != nil {
-				ui.Warning(fmt.Sprintf("Failed to backup existing .claude: %v", err))
+
+			// Create symlink
+			if err := os.Symlink(sourcePath, targetPath); err != nil {
+				ui.Warning(fmt.Sprintf("Failed to create symlink %s: %v", link.Target, err))
 			} else {
-				ui.Info(fmt.Sprintf("Backed up existing .claude to %s", backupPath))
+				ui.CheckMark(fmt.Sprintf("Linked %s -> %s", link.Target, link.Source))
 			}
 		}
+		ui.NewLine()
 	}
 
-	// Create symlink
-	if err := os.Symlink(relPath, claudeSymlink); err != nil {
-		ui.Warning(fmt.Sprintf("Failed to create .claude symlink: %v", err))
-	} else {
-		ui.CheckMark("Linked .claude to root")
+	// Copy files from configuration
+	if len(workCfg.Copies) > 0 {
+		ui.Section("Copying files...")
+		for _, copy := range workCfg.Copies {
+			sourcePath := cfg.ProjectRoot + "/" + copy.Source
+			targetPath := featureDir + "/" + copy.Target
+
+			// Check if source exists
+			sourceInfo, err := os.Stat(sourcePath)
+			if os.IsNotExist(err) {
+				ui.Warning(fmt.Sprintf("Source not found: %s", copy.Source))
+				continue
+			}
+
+			// Handle directories vs files
+			if sourceInfo.IsDir() {
+				// Copy directory recursively using cp command
+				cpCmd := exec.Command("cp", "-R", sourcePath, targetPath)
+				if err := cpCmd.Run(); err != nil {
+					ui.Warning(fmt.Sprintf("Failed to copy directory %s: %v", copy.Source, err))
+				} else {
+					ui.CheckMark(fmt.Sprintf("Copied directory %s -> %s", copy.Source, copy.Target))
+				}
+			} else {
+				// Copy file
+				sourceData, err := os.ReadFile(sourcePath)
+				if err != nil {
+					ui.Warning(fmt.Sprintf("Failed to read %s: %v", copy.Source, err))
+					continue
+				}
+
+				if err := os.WriteFile(targetPath, sourceData, 0644); err != nil {
+					ui.Warning(fmt.Sprintf("Failed to copy %s: %v", copy.Target, err))
+				} else {
+					ui.CheckMark(fmt.Sprintf("Copied %s -> %s", copy.Source, copy.Target))
+				}
+			}
+		}
+		ui.NewLine()
 	}
-	ui.NewLine()
+
+	// Generate compose project names for each service
+	template := workCfg.GetComposeProjectTemplate()
+	composeProjects := make(map[string]string)
+	for _, projectName := range presetCfg.Projects {
+		composeProjects[projectName] = workCfg.ReplaceComposeProjectPlaceholders(template, featureName, projectName)
+	}
 
 	// Add to registry
 	wt := &registry.Worktree{
-		Branch:         branch,
-		Normalized:     featureName,
-		Created:        time.Now(),
-		Projects:       presetCfg.Projects,
-		Ports:          ports,
-		ComposeProject: fmt.Sprintf("skillsetup-%s", featureName),
+		Branch:          branch,
+		Normalized:      featureName,
+		Created:         time.Now(),
+		Projects:        presetCfg.Projects,
+		Ports:           ports,
+		ComposeProjects: composeProjects,
+		YoloMode:        yoloModeNF,
 	}
 	if err := reg.Add(wt); err != nil {
 		checkError(err)
@@ -175,20 +269,40 @@ func runNewFeature(cmd *cobra.Command, args []string) {
 		checkError(err)
 	}
 	ui.CheckMark("Registry updated")
+
+	// Write .worktree-instance marker file
+	if err := config.WriteInstanceMarker(featureDir, featureName, instance, cfg.ProjectRoot, presetCfg.Projects, ports, yoloModeNF); err != nil {
+		ui.Warning(fmt.Sprintf("Failed to write instance marker: %v", err))
+	} else {
+		ui.CheckMark("Instance marker created")
+	}
 	ui.NewLine()
 
-	// Export environment variables
-	envVars := map[string]string{
-		"FEATURE_NAME":         featureName,
-		"COMPOSE_PROJECT_NAME": wt.ComposeProject,
-	}
+	// Export all environment variables (includes allocated ports + calculated values like INSTANCE, LOCALSTACK_EXT_*)
+	baseEnvVars := workCfg.ExportEnvVars(instance)
+	baseEnvVars["FEATURE_NAME"] = featureName
+
+	// Override with actually allocated ports (in case of conflicts)
 	for service, port := range ports {
-		envVars[service] = fmt.Sprintf("%d", port)
+		baseEnvVars[service] = fmt.Sprintf("%d", port)
 	}
 
-	envList := os.Environ()
-	for key, value := range envVars {
-		envList = append(envList, fmt.Sprintf("%s=%s", key, value))
+	// Recompute value-template vars (e.g., GOOGLE_OAUTH_REDIRECT_URI) now that actual
+	// allocated ports are in baseEnvVars. Without this, they resolve against base port
+	// expressions (always 3000, 8080, etc.) instead of the real allocated ports.
+	workCfg.ResolveValueVars(instance, baseEnvVars)
+
+	// Persist computed vars to registry for visibility in `worktree list`
+	wt.ComputedVars = workCfg.GetComputedVars(baseEnvVars)
+	if err := reg.Save(); err != nil {
+		ui.Warning(fmt.Sprintf("Failed to update registry computed vars: %v", err))
+	}
+
+	// Generate configured files for each project (e.g., .env.development.local)
+	for _, projectName := range presetCfg.Projects {
+		if err := workCfg.GenerateFiles(projectName, featureDir, baseEnvVars); err != nil {
+			ui.Warning(fmt.Sprintf("Failed to generate files for %s: %v", projectName, err))
+		}
 	}
 
 	// Start services for each project
@@ -205,6 +319,20 @@ func runNewFeature(cmd *cobra.Command, args []string) {
 
 		worktreePath := featureDir + "/" + project.Dir
 
+		// Build environment list with per-service COMPOSE_PROJECT_NAME
+		envList := os.Environ()
+		for key, value := range baseEnvVars {
+			envList = append(envList, fmt.Sprintf("%s=%s", key, value))
+		}
+		// Add service-specific compose project name
+		composeProject := wt.GetComposeProject(projectName)
+		envList = append(envList, fmt.Sprintf("COMPOSE_PROJECT_NAME=%s", composeProject))
+
+		if verbose {
+			ui.Info(fmt.Sprintf("Starting %s with COMPOSE_PROJECT_NAME=%s", projectName, composeProject))
+			ui.Info(fmt.Sprintf("Start command: %s", project.StartCommand))
+		}
+
 		// Replace placeholders in start command
 		startCmd := project.StartCommand
 		// Note: ReplaceInstancePlaceholder will be updated separately, for now use feature name
@@ -220,40 +348,31 @@ func runNewFeature(cmd *cobra.Command, args []string) {
 		if err := makeCmd.Run(); err != nil {
 			ui.Warning(fmt.Sprintf("Failed to start %s: %v", projectName, err))
 		} else {
-			ui.CheckMark(fmt.Sprintf("Started %s", projectName))
+			// Verify containers are actually running (wait for startup)
+			time.Sleep(3 * time.Second)
+
+			containerStatus, err := docker.GetFeatureContainerStatus(workCfg.ProjectName, featureName)
+			if err != nil {
+				ui.Warning(fmt.Sprintf("Could not verify %s container status: %v", projectName, err))
+			} else {
+				// Check if any containers exited
+				hasFailures := false
+				for service, status := range containerStatus {
+					if strings.Contains(strings.ToLower(status), "exited") {
+						ui.Warning(fmt.Sprintf("%s service '%s' exited: %s", projectName, service, status))
+						hasFailures = true
+					}
+				}
+
+				if !hasFailures && len(containerStatus) > 0 {
+					ui.CheckMark(fmt.Sprintf("Started %s", projectName))
+				} else if len(containerStatus) == 0 {
+					ui.Warning(fmt.Sprintf("No containers found for %s", projectName))
+				}
+			}
 		}
 	}
 	ui.NewLine()
-
-	// Run migrations for backend (if configured)
-	if workCfg.AutoMigrations && !noMigrationsNF {
-		ui.Section("Running migrations...")
-		for _, projectName := range presetCfg.Projects {
-			project := workCfg.Projects[projectName]
-
-			if project.MigrationCommand == "" {
-				continue
-			}
-
-			ui.Loading(fmt.Sprintf("Running %s migrations...", projectName))
-
-			worktreePath := featureDir + "/" + project.Dir
-			migrationCmd := project.MigrationCommand
-
-			cmd := exec.Command("sh", "-c", migrationCmd)
-			cmd.Dir = worktreePath
-			cmd.Env = envList
-			cmd.Stdout = os.Stdout
-			cmd.Stderr = os.Stderr
-
-			if err := cmd.Run(); err != nil {
-				ui.Warning(fmt.Sprintf("Failed to run migrations: %v", err))
-			} else {
-				ui.CheckMark(fmt.Sprintf("Migrations completed for %s", projectName))
-			}
-		}
-		ui.NewLine()
-	}
 
 	// Run post-commands (fixtures, seed data, etc.)
 	if workCfg.AutoFixtures && !noFixturesNF {
@@ -261,14 +380,22 @@ func runNewFeature(cmd *cobra.Command, args []string) {
 		for _, projectName := range presetCfg.Projects {
 			project := workCfg.Projects[projectName]
 
-			if project.PostCommand == "" {
+			if project.StartPostCommand == "" {
 				continue
 			}
 
 			ui.Loading(fmt.Sprintf("Running %s post-command...", projectName))
 
 			worktreePath := featureDir + "/" + project.Dir
-			postCmd := project.PostCommand
+			postCmd := project.StartPostCommand
+
+			// Build environment list with per-service COMPOSE_PROJECT_NAME
+			envList := os.Environ()
+			for key, value := range baseEnvVars {
+				envList = append(envList, fmt.Sprintf("%s=%s", key, value))
+			}
+			// Add service-specific compose project name
+			envList = append(envList, fmt.Sprintf("COMPOSE_PROJECT_NAME=%s", wt.GetComposeProject(projectName)))
 
 			cmd := exec.Command("sh", "-c", postCmd)
 			cmd.Dir = worktreePath
@@ -285,26 +412,33 @@ func runNewFeature(cmd *cobra.Command, args []string) {
 		ui.NewLine()
 	}
 
-	// Get Claude working directory
-	claudeProject := workCfg.GetClaudeWorkingProject()
+	// Get Claude working directory (from preset projects, not all projects)
+	claudeProject := getClaudeWorkingProject(workCfg, presetCfg.Projects)
 	claudePath := fmt.Sprintf("worktrees/%s/%s", featureName, workCfg.Projects[claudeProject].Dir)
 
 	// Success message
 	ui.Success("Feature environment ready!")
 	ui.NewLine()
 
-	// Show access URLs
-	ui.PrintHeader("Access services:")
-	ui.PrintStatusLine("Frontend", fmt.Sprintf("http://localhost:%d", ports["FE_PORT"]))
-	ui.PrintStatusLine("Backend", fmt.Sprintf("http://localhost:%d", ports["BE_PORT"]))
-	ui.PrintStatusLine("Mailpit", fmt.Sprintf("http://localhost:%d", ports["MAILPIT_UI_PORT"]))
-	ui.NewLine()
-
 	// Navigate Claude
 	ui.PrintHeader("Claude is ready to work:")
-	ui.PrintStatusLine("Working directory", claudePath)
-	ui.PrintStatusLine("Feature name", featureName)
+	ui.PrintStatusLine("  Working directory", claudePath)
+	ui.PrintStatusLine("  Feature name", featureName)
+
+	// Show YOLO mode status
+	if wt.YoloMode {
+		ui.PrintStatusLine("  YOLO Mode", "🚀 Enabled (autonomous mode)")
+	}
 	ui.NewLine()
+
+	// Show access URLs dynamically from config
+	displayServices := workCfg.GetDisplayableServices(ports)
+	if len(displayServices) > 0 {
+		for name, url := range displayServices {
+			ui.PrintStatusLine("  "+name, url)
+		}
+		ui.NewLine()
+	}
 
 	// Change to working directory
 	if err := os.Chdir(claudePath); err != nil {
@@ -317,4 +451,77 @@ func runNewFeature(cmd *cobra.Command, args []string) {
 	}
 
 	ui.NewLine()
+}
+
+// displayDryRunPreview shows what would be created without actually creating it
+func displayDryRunPreview(featureName string, instance int, ports map[string]int, workCfg *config.WorktreeConfig, presetCfg *config.PresetConfig, cfg *config.Config) {
+	ui.Section("🔍 Dry Run - Preview Mode")
+
+	// Port allocation preview
+	fmt.Println("Port Allocation:")
+	for service, port := range ports {
+		ui.CheckMark(fmt.Sprintf("%s: %d", service, port))
+	}
+	ui.NewLine()
+
+	// Instance and environment variables
+	fmt.Printf("Instance: %d\n", instance)
+	baseEnvVars := workCfg.ExportEnvVars(instance)
+	for key, value := range baseEnvVars {
+		ui.CheckMark(fmt.Sprintf("%s=%s", key, value))
+	}
+	ui.NewLine()
+
+	// Worktrees to be created
+	fmt.Println("Worktrees to create:")
+	featureDir := cfg.WorktreeFeaturePath(featureName)
+	for _, projectName := range presetCfg.Projects {
+		project := workCfg.Projects[projectName]
+		worktreePath := featureDir + "/" + project.Dir
+		ui.CheckMark(worktreePath)
+	}
+	ui.NewLine()
+
+	// Symlinks
+	if len(workCfg.Symlinks) > 0 {
+		fmt.Println("Symlinks to create:")
+		for _, link := range workCfg.Symlinks {
+			ui.CheckMark(fmt.Sprintf("%s -> %s", link.Target, link.Source))
+		}
+		ui.NewLine()
+	}
+
+	// Copies
+	if len(workCfg.Copies) > 0 {
+		fmt.Println("Files to copy:")
+		for _, copy := range workCfg.Copies {
+			ui.CheckMark(fmt.Sprintf("%s -> %s", copy.Source, copy.Target))
+		}
+		ui.NewLine()
+	}
+
+	// Services to start
+	fmt.Println("Services to start:")
+	for _, projectName := range presetCfg.Projects {
+		project := workCfg.Projects[projectName]
+		if project.StartCommand != "" {
+			ui.CheckMark(fmt.Sprintf("%s: %s", projectName, project.StartCommand))
+		}
+	}
+	ui.NewLine()
+
+	// Post commands
+	if workCfg.AutoFixtures && !noFixturesNF {
+		fmt.Println("Post-startup commands:")
+		for _, projectName := range presetCfg.Projects {
+			project := workCfg.Projects[projectName]
+			if project.StartPostCommand != "" {
+				ui.CheckMark(fmt.Sprintf("%s: %s", projectName, project.StartPostCommand))
+			}
+		}
+		ui.NewLine()
+	}
+
+	ui.Info("This is a dry run - no changes were made")
+	fmt.Println("💡 Run without --dry-run to create the feature")
 }

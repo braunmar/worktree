@@ -1,8 +1,11 @@
+// Package ui provides colored terminal output utilities for the worktree manager CLI.
+// It includes functions for printing success, error, warning, and informational messages
+// with consistent formatting and emoji indicators.
 package ui
 
 import (
 	"fmt"
-	"worktree/pkg/config"
+	"github.com/braunmar/worktree/pkg/config"
 
 	"github.com/fatih/color"
 )
@@ -64,7 +67,7 @@ func CrossMark(message string) {
 }
 
 // ShowPortsFromConfig displays port mapping from configuration
-func ShowPortsFromConfig(instance int, portConfigs map[string]config.PortConfig) {
+func ShowPortsFromConfig(hostname string, instance int, ports map[string]int, portConfigs map[string]config.EnvVarConfig) {
 	if len(portConfigs) == 0 {
 		// Fallback to showing instance number only
 		fmt.Printf("\n%s Instance %d configured\n\n", "📍", instance)
@@ -75,12 +78,21 @@ func ShowPortsFromConfig(instance int, portConfigs map[string]config.PortConfig)
 
 	// Display ports in order (if config preserves order, or alphabetically)
 	// Skip entries without a name (used only for env var export)
-	for _, portCfg := range portConfigs {
+	for envName, portCfg := range portConfigs {
 		// Skip if name is empty or URL is null/empty
 		if portCfg.Name == "" || portCfg.Name == "null" {
 			continue
 		}
-		url := portCfg.GetURL(instance)
+		if portCfg.URL == "" || portCfg.URL == "null" {
+			continue
+		}
+
+		port, exists := ports[envName]
+		if !exists {
+			continue
+		}
+
+		url := portCfg.GetURL(hostname, port)
 		if url == "" || url == "null" {
 			continue
 		}
@@ -123,4 +135,19 @@ func PrintTable(col1, col2 string) {
 // NewLine prints a new line
 func NewLine() {
 	fmt.Println()
+}
+
+// Progress prints a progress indicator with current/total counts
+func Progress(current, total int, message string) {
+	fmt.Printf("%s %s... (%d/%d)\n", "⏳", message, current, total)
+}
+
+// ProgressWithName prints a progress indicator for a named item
+func ProgressWithName(current, total int, itemName, action string) {
+	fmt.Printf("%s %s %s... (%d/%d)\n", "⏳", action, itemName, current, total)
+}
+
+// Bold returns a bold-formatted string
+func Bold(text string) string {
+	return bold(text)
 }

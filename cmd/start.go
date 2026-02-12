@@ -4,10 +4,13 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"strings"
 
-	"worktree/pkg/config"
-	"worktree/pkg/registry"
-	"worktree/pkg/ui"
+	"github.com/braunmar/worktree/pkg/config"
+	"github.com/braunmar/worktree/pkg/process"
+	"github.com/braunmar/worktree/pkg/registry"
+	"github.com/braunmar/worktree/pkg/ui"
 
 	"github.com/spf13/cobra"
 )
@@ -18,18 +21,22 @@ var (
 )
 
 var startCmd = &cobra.Command{
-	Use:   "start <feature-name>",
+	Use:   "start [feature-name]",
 	Short: "Start all services for a feature worktree",
 	Long: `Start all services for a feature worktree based on preset configuration.
 
 Starts ALL projects defined in the preset sequentially. Works with detached Docker
 services that return immediately.
 
-Example:
-  worktree start feature-user-auth                  # Start feature
+If no feature name is provided and you're in a worktree directory,
+the feature will be auto-detected from .worktree-instance.
+
+Examples:
+  worktree start feature-user-auth                  # Explicit feature name
+  worktree start                                    # Auto-detect from current directory
   worktree start feature-reports --preset backend   # Use specific preset
   worktree start feature-api --no-fixtures          # Skip post-startup tasks`,
-	Args: cobra.ExactArgs(1),
+	Args: cobra.MaximumNArgs(1),
 	Run:  runStart,
 }
 
@@ -39,22 +46,65 @@ func init() {
 }
 
 func runStart(cmd *cobra.Command, args []string) {
-	featureName := args[0]
+	var featureName string
+	autoDetected := false
+	verbose, _ := cmd.Flags().GetBool("verbose")
+
+	// Auto-detect feature name if not provided
+	if len(args) == 0 {
+		instance, err := config.DetectInstance()
+		if err != nil {
+			ui.Error("Not in a worktree directory and no feature name provided")
+			ui.Info("Usage: worktree start <feature-name>")
+			ui.Info("   or: cd to a worktree directory and run: worktree start")
+			os.Exit(1)
+		}
+		featureName = instance.Feature
+		autoDetected = true
+	} else {
+		featureName = args[0]
+	}
 
 	// Get configuration
 	cfg, err := config.New()
 	checkError(err)
+	if verbose {
+		ui.Info(fmt.Sprintf("Loaded configuration from: %s", cfg.ProjectRoot))
+	}
+
+	// Load worktree configuration
+	workCfg, err := config.LoadWorktreeConfig(cfg.ProjectRoot)
+	checkError(err)
+	if verbose {
+		ui.Info(fmt.Sprintf("Loaded worktree configuration with %d projects", len(workCfg.Projects)))
+	}
 
 	// Load registry
-	reg, err := registry.Load(cfg.WorktreeDir)
+	reg, err := registry.Load(cfg.WorktreeDir, workCfg)
 	checkError(err)
+	if verbose {
+		ui.Info(fmt.Sprintf("Loaded registry from: %s", cfg.WorktreeDir))
+		ui.Info(fmt.Sprintf("Found %d existing worktrees", len(reg.Worktrees)))
+	}
 
 	// Get worktree from registry
 	wt, exists := reg.Get(featureName)
 	if !exists {
 		ui.Error(fmt.Sprintf("Feature worktree '%s' not found", featureName))
+
+		// Suggest similar names
+		allWorktrees := reg.List()
+		similar := findSimilarFeatures(featureName, allWorktrees)
+
+		if len(similar) > 0 {
+			fmt.Println("\nDid you mean:")
+			for _, name := range similar {
+				fmt.Printf("  - %s\n", name)
+			}
+		}
+
 		fmt.Println("\nAvailable features:")
-		for _, w := range reg.List() {
+		for _, w := range allWorktrees {
 			fmt.Printf("  - %s\n", w.Normalized)
 		}
 		os.Exit(1)
@@ -65,10 +115,6 @@ func runStart(cmd *cobra.Command, args []string) {
 		ui.Error(fmt.Sprintf("Feature directory not found: worktrees/%s", featureName))
 		os.Exit(1)
 	}
-
-	// Load worktree configuration
-	workCfg, err := config.LoadWorktreeConfig(cfg.ProjectRoot)
-	checkError(err)
 
 	// Get preset (from flag or use projects from registry)
 	var projects []string
@@ -87,35 +133,57 @@ func runStart(cmd *cobra.Command, args []string) {
 
 	// Display header
 	ui.Rocket(fmt.Sprintf("Starting Feature: %s", featureName))
+	if autoDetected {
+		ui.Info("✨ Auto-detected from current directory")
+	}
 	ui.Info(fmt.Sprintf("Branch: %s", wt.Branch))
 	ui.NewLine()
 
 	// Show port mapping from registry
 	ui.Section("Port mapping:")
-	ui.PrintStatusLine("Frontend", fmt.Sprintf("http://localhost:%d", wt.Ports["FE_PORT"]))
-	ui.PrintStatusLine("Backend", fmt.Sprintf("http://localhost:%d", wt.Ports["BE_PORT"]))
-	ui.PrintStatusLine("PostgreSQL", fmt.Sprintf("localhost:%d", wt.Ports["POSTGRES_PORT"]))
-	ui.PrintStatusLine("Mailpit", fmt.Sprintf("http://localhost:%d", wt.Ports["MAILPIT_UI_PORT"]))
+	displayServices := workCfg.GetDisplayableServices(wt.Ports)
+	for name, url := range displayServices {
+		ui.PrintStatusLine(name, url)
+	}
 	ui.NewLine()
 
-	// Export environment variables
-	envVars := map[string]string{
-		"FEATURE_NAME":         featureName,
-		"COMPOSE_PROJECT_NAME": wt.ComposeProject,
-	}
+	// Calculate instance from allocated APP_PORT in registry
+	appPortCfg := workCfg.EnvVariables["APP_PORT"]
+	basePort, err := config.ExtractBasePort(appPortCfg.Port)
+	checkError(err)
+	instance := wt.Ports["APP_PORT"] - basePort
+
+	// Export all environment variables (includes allocated ports + calculated values like INSTANCE, LOCALSTACK_EXT_*)
+	baseEnvVars := workCfg.ExportEnvVars(instance)
+	baseEnvVars["FEATURE_NAME"] = featureName
+
+	// Override with allocated ports from registry
 	for service, port := range wt.Ports {
-		envVars[service] = fmt.Sprintf("%d", port)
+		baseEnvVars[service] = fmt.Sprintf("%d", port)
 	}
 
-	envList := os.Environ()
-	for key, value := range envVars {
-		envList = append(envList, fmt.Sprintf("%s=%s", key, value))
+	// Recompute value-template vars (e.g., GOOGLE_OAUTH_REDIRECT_URI) now that actual
+	// allocated ports are in baseEnvVars. Without this, they resolve against base port
+	// expressions (always 3000, 8080, etc.) instead of the real allocated ports.
+	workCfg.ResolveValueVars(instance, baseEnvVars)
+
+	// Persist computed vars to registry for visibility in `worktree list`
+	wt.ComputedVars = workCfg.GetComputedVars(baseEnvVars)
+	if err := reg.Save(); err != nil {
+		ui.Warning(fmt.Sprintf("Failed to update registry computed vars: %v", err))
 	}
 
 	featureDir := cfg.WorktreeFeaturePath(featureName)
 
+	// Generate configured files for each project (e.g., .env.development.local)
+	for _, projectName := range projects {
+		if err := workCfg.GenerateFiles(projectName, featureDir, baseEnvVars); err != nil {
+			ui.Warning(fmt.Sprintf("Failed to generate files for %s: %v", projectName, err))
+		}
+	}
+
 	// Start ALL projects sequentially
-	for i, projectName := range projects {
+	for _, projectName := range projects {
 		project := workCfg.Projects[projectName]
 		worktreePath := featureDir + "/" + project.Dir
 
@@ -125,19 +193,44 @@ func runStart(cmd *cobra.Command, args []string) {
 			os.Exit(1)
 		}
 
+		// Build environment list with per-service COMPOSE_PROJECT_NAME
+		envList := os.Environ()
+		for key, value := range baseEnvVars {
+			envList = append(envList, fmt.Sprintf("%s=%s", key, value))
+		}
+		// Add service-specific compose project name
+		composeProject := wt.GetComposeProject(projectName)
+		envList = append(envList, fmt.Sprintf("COMPOSE_PROJECT_NAME=%s", composeProject))
+
+		if verbose {
+			ui.Info(fmt.Sprintf("Starting %s with COMPOSE_PROJECT_NAME=%s", projectName, composeProject))
+			ui.Info(fmt.Sprintf("Start command: %s", project.StartCommand))
+			ui.Info(fmt.Sprintf("Working directory: %s", worktreePath))
+		}
+
+		// Pre-start hook
+		runHookCommand(fmt.Sprintf("%s: start_pre_command", projectName), project.StartPreCommand, worktreePath, envList)
+
 		// Start services
 		ui.Loading(fmt.Sprintf("Starting %s...", projectName))
 		ui.NewLine()
 
-		// Execute start command via shell
-		shellCmd := exec.Command("sh", "-c", project.StartCommand)
-		shellCmd.Dir = worktreePath
-		shellCmd.Env = envList
-		shellCmd.Stdout = os.Stdout
-		shellCmd.Stderr = os.Stderr
-
-		if err := shellCmd.Run(); err != nil {
-			ui.Error(fmt.Sprintf("Failed to start %s: %v", projectName, err))
+		// Execute start command — behaviour depends on executor type
+		var startErr error
+		switch project.GetExecutor() {
+		case "process":
+			pidFile := filepath.Join(featureDir, projectName+".pid")
+			startErr = process.StartBackground(projectName, project.StartCommand, worktreePath, envList, pidFile)
+		default: // "docker"
+			shellCmd := exec.Command("sh", "-c", project.StartCommand)
+			shellCmd.Dir = worktreePath
+			shellCmd.Env = envList
+			shellCmd.Stdout = os.Stdout
+			shellCmd.Stderr = os.Stderr
+			startErr = shellCmd.Run()
+		}
+		if startErr != nil {
+			ui.Error(fmt.Sprintf("Failed to start %s: %v", projectName, startErr))
 			os.Exit(1)
 		}
 
@@ -145,32 +238,33 @@ func runStart(cmd *cobra.Command, args []string) {
 		ui.Success(fmt.Sprintf("%s started!", projectName))
 		ui.NewLine()
 
-		// Run post command for first project (unless --no-fixtures)
-		if i == 0 && !noFixtures && project.PostCommand != "" {
-			ui.Loading("Running post-startup tasks...")
-			ui.NewLine()
-
-			// Execute via shell to support && chains
-			postShellCmd := exec.Command("sh", "-c", project.PostCommand)
-			postShellCmd.Dir = worktreePath
-			postShellCmd.Env = envList
-			postShellCmd.Stdout = os.Stdout
-			postShellCmd.Stderr = os.Stderr
-
-			if err := postShellCmd.Run(); err != nil {
-				ui.Warning(fmt.Sprintf("Failed to run post-startup tasks: %v", err))
-				ui.Info(fmt.Sprintf("You can run manually: %s", project.PostCommand))
-			} else {
-				ui.Success("Post-startup tasks completed!")
-			}
-			ui.NewLine()
+		// Post-start hook (unless --no-fixtures)
+		if !noFixtures {
+			runHookCommand(fmt.Sprintf("%s: start_post_command", projectName), project.StartPostCommand, worktreePath, envList)
 		}
 	}
 
 	// Show final summary
 	ui.Success("All services started!")
 	ui.NewLine()
-	ui.PrintStatusLine("Frontend", fmt.Sprintf("http://localhost:%d", wt.Ports["FE_PORT"]))
-	ui.PrintStatusLine("Backend", fmt.Sprintf("http://localhost:%d", wt.Ports["BE_PORT"]))
+	displayServices = workCfg.GetDisplayableServices(wt.Ports)
+	for name, url := range displayServices {
+		ui.PrintStatusLine(name, url)
+	}
 	ui.NewLine()
+}
+
+// findSimilarFeatures finds feature names similar to the input using simple string matching
+func findSimilarFeatures(input string, worktrees []*registry.Worktree) []string {
+	similar := []string{}
+
+	for _, wt := range worktrees {
+		name := wt.Normalized
+		// Check if the input is a substring of the feature name
+		if len(input) >= 3 && strings.Contains(name, input) {
+			similar = append(similar, name)
+		}
+	}
+
+	return similar
 }

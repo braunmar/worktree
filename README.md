@@ -1,155 +1,89 @@
 # Worktree Manager
 
-A Go CLI tool for managing git worktrees in Skillsetup's multi-instance development environment.
+[![CI](https://github.com/braunmar/worktree/actions/workflows/ci.yml/badge.svg)](https://github.com/braunmar/worktree/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/braunmar/worktree/branch/main/graph/badge.svg)](https://codecov.io/gh/braunmar/worktree)
+[![Go Report Card](https://goreportcard.com/badge/github.com/braunmar/worktree)](https://goreportcard.com/report/github.com/braunmar/worktree)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-## Features
+> **Disclaimer:** This software is provided "as is", without warranty of any kind. See [LICENSE](LICENSE) for full terms.
 
-- **Coordinated Worktrees**: Creates backend + frontend worktrees together
-- **Instance Integration**: Works seamlessly with multi-instance Docker setup
-- **Automatic Fixtures**: Runs database fixtures after backend starts
-- **Frontend Docker**: Runs frontend in Docker with dynamic environment variables
-- **Safety Checks**: Warns about uncommitted changes and running instances
-- **Status Tracking**: Shows running instances and git status
+## Motivation
 
-## Architecture
+A CLI tool for managing multiple git worktrees with coordinated Docker environments and dynamic port allocation.
 
-```
-tools/worktree-manager/
-├── cmd/                    # CLI commands
-│   ├── root.go            # Root command setup
-│   ├── create.go          # Create worktrees
-│   ├── remove.go          # Remove worktrees
-│   ├── start.go           # Start instance with fixtures
-│   └── list.go            # List worktrees
-├── pkg/                    # Shared packages
-│   ├── config/            # Configuration and port calculations
-│   ├── git/               # Git worktree operations
-│   ├── docker/            # Docker instance checks
-│   └── ui/                # Colored terminal output
-├── main.go                # Entry point
-├── Makefile               # Build system
-└── go.mod                 # Dependencies
+This is not a replacement of your setup of Git worktrees, [OpenClaw](https://openclaw.ai/) or [Vibe-Kanban](https://www.vibekanban.com/). It is meant to extend it.
+
+Keep your main .git repo for hotfixes and code reviews. Configure, run and develop 1-N features separately with your preferred tooling in git worktrees. It is meant for humans when you want develop N features/fixes simultaneously, but it can be used as tool for agents.
+
+## How it works
+
+Simply configure your needs, wrapping git worktrees, allocating ports, setting correct ENVironment and executing pre-command, command, post-command to manage multiple git worktrees environments.
+
+## Quick Start
+
+### 1. Install
+
+**Option 1: Go Install (Recommended)**
+```bash
+go install github.com/braunmar/worktree@latest
 ```
 
-## Building
+**Option 2: Download Release**
+
+Download the latest binary from [GitHub Releases](https://github.com/braunmar/worktree/releases).
+
+**Option 3: Build from Source**
+```bash
+make build
+make install
+```
+
+### 2. Create Configuration
+
+Create a `.worktree.yml` file in your project root. See [.worktree.example.yml](.worktree.example.yml) for a complete example or real project configuration [.worktree.example-real.yml](.worktree.example-real.yml).
+
+### 3. Create Your First Feature
 
 ```bash
-make build          # Build binary to ../../scripts/worktree
-make clean          # Remove binary
-make test           # Run tests
-make fmt            # Format code
-make vet            # Vet code
+worktree new-feature feature/my-feature
 ```
 
-## Usage
+That's it! The tool will create worktrees, allocate ports, and start services.
 
-See [WORKTREE-WORKFLOW.md](../../WORKTREE-WORKFLOW.md) for complete documentation.
-
-### Quick Reference
+## Common Commands
 
 ```bash
-# Create worktrees
-scripts/worktree create feature/my-feature 1
-
-# Start backend with fixtures
-scripts/worktree start 1
-
-# Start backend without fixtures
-scripts/worktree start 1 --no-fixtures
-
-# List all worktrees
-scripts/worktree list
-
-# Remove worktrees
-scripts/worktree remove 1
+worktree list                    # List all features
+worktree start <feature-name>    # Start a feature
+worktree stop <feature-name>     # Stop a feature
+worktree remove <feature-name>   # Remove a feature
+worktree doctor                  # Check health
 ```
 
-## Dependencies
+## Documentation
 
-- **cobra**: CLI framework
-- **color**: Colored terminal output
-- **Go 1.21+**: Required Go version
+- **Configuration**: See [.worktree.example.yml](.worktree.example.yml) or real project configuration [.worktree.example-real.yml](.worktree.example-real.yml) for all options
+- **Development**: See [CLAUDE.md](CLAUDE.md) for architecture and patterns
 
-## Configuration
+## TODO
 
-The tool automatically discovers:
-- Project root (by finding `backend/` and `frontend/` directories)
-- Instance ports (calculated from instance number)
-- Worktree paths (`worktrees/N/backend`, `worktrees/N/frontend`)
+Simple agents workflow configuration is on the roadmap, it is meant to run simple agents for simple needs like housekeeping jobs (npm audit, security audit, code coverage, ...). This feature MAY or MAY NOT be separated in the future. You can experiment and help to evolve it.
 
-## Fixture Support
+- [ ] Battletest simple agents setup
+- [ ] Review Github actions
 
-When you run `worktree start <instance>`, it automatically:
-1. Starts backend services
-2. Waits for services to be ready
-3. Runs `make dev-fixture INSTANCE=N` to load seed data
-4. Shows frontend start command
+## Contributing
 
-Skip fixtures with `--no-fixtures`:
-```bash
-worktree start 1 --no-fixtures
-```
+Contributions welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
-## Frontend Docker
+## Security
 
-Frontend runs in Docker with dynamic environment variables:
-- `REACT_APP_API_BASE_URL` is set based on instance number
-- Container connects to backend's Docker network
-- Hot reload works via polling
+To report a vulnerability, see [SECURITY.md](SECURITY.md). Do not open public issues for security problems.
 
-Start with:
-```bash
-cd worktrees/1/frontend
-make up-docker INSTANCE=1
-```
+## Code of Conduct
 
-## Development
-
-### Adding a New Command
-
-1. Create `cmd/<command>.go`
-2. Implement cobra command structure
-3. Register in `cmd/root.go` init()
-4. Rebuild with `make build`
-
-### Adding a New Package
-
-1. Create `pkg/<package>/<file>.go`
-2. Export functions with capital letters
-3. Import in commands as needed
-
-### Testing
-
-```bash
-# Run tests
-make test
-
-# Test specific package
-go test ./pkg/config -v
-```
-
-## Troubleshooting
-
-### "Could not find project root"
-
-Make sure you're running from within the Skillsetup project directory. The tool looks for `backend/` and `frontend/` directories.
-
-### "Failed to run fixtures"
-
-Check that `make dev-fixture` exists in the backend Makefile and works correctly:
-```bash
-cd backend
-make dev-fixture INSTANCE=1
-```
-
-### Frontend not connecting to backend
-
-Verify the Docker network exists and backend is running:
-```bash
-docker network ls | grep skillsetup
-docker ps | grep skillsetup-inst1
-```
+This project follows the [Code of Conduct](CODE_OF_CONDUCT.md). By participating, you agree to uphold it.
 
 ## License
 
-Internal tool for Skillsetup development.
+MIT License — see [LICENSE](LICENSE).
