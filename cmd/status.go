@@ -69,8 +69,17 @@ func runStatus(cmd *cobra.Command, args []string) {
 	// Check worktree status
 	if cfg.WorktreeExists(featureName) {
 		ui.PrintStatusLine("Worktree", "✅ Exists")
-		ui.Info(fmt.Sprintf("  Backend:  %s", cfg.WorktreeBackendPath(featureName)))
-		ui.Info(fmt.Sprintf("  Frontend: %s", cfg.WorktreeFrontendPath(featureName)))
+
+		// Show all project worktree paths
+		featureDir := cfg.WorktreeFeaturePath(featureName)
+		for _, projectName := range wt.Projects {
+			project, exists := workCfg.Projects[projectName]
+			if !exists {
+				continue
+			}
+			worktreePath := featureDir + "/" + project.Dir
+			ui.Info(fmt.Sprintf("  %s: %s", projectName, worktreePath))
+		}
 		ui.NewLine()
 	} else {
 		ui.PrintStatusLine("Worktree", "⚠️  Directory not found")

@@ -360,3 +360,23 @@ func (c *WorktreeConfig) GetPortServiceNames() []string {
 	}
 	return services
 }
+
+// GetComposeProjectTemplate returns the template for compose project names
+// Returns "{project}-{feature}" as default if not configured
+func (c *WorktreeConfig) GetComposeProjectTemplate() string {
+	if portCfg, exists := c.Ports["COMPOSE_PROJECT_NAME"]; exists && portCfg.Value != "" {
+		return portCfg.Value
+	}
+	// Default template for backward compatibility
+	return "{project}-{feature}"
+}
+
+// ReplaceComposeProjectPlaceholders replaces placeholders in a compose project name template
+// Supported placeholders: {project}, {feature}, {service}
+func (c *WorktreeConfig) ReplaceComposeProjectPlaceholders(template, featureName, serviceName string) string {
+	result := template
+	result = strings.ReplaceAll(result, "{project}", c.ProjectName)
+	result = strings.ReplaceAll(result, "{feature}", featureName)
+	result = strings.ReplaceAll(result, "{service}", serviceName)
+	return result
+}

@@ -202,14 +202,21 @@ func runNewFeature(cmd *cobra.Command, args []string) {
 		ui.NewLine()
 	}
 
+	// Generate compose project names for each service
+	template := workCfg.GetComposeProjectTemplate()
+	composeProjects := make(map[string]string)
+	for _, projectName := range presetCfg.Projects {
+		composeProjects[projectName] = workCfg.ReplaceComposeProjectPlaceholders(template, featureName, projectName)
+	}
+
 	// Add to registry
 	wt := &registry.Worktree{
-		Branch:         branch,
-		Normalized:     featureName,
-		Created:        time.Now(),
-		Projects:       presetCfg.Projects,
-		Ports:          ports,
-		ComposeProject: fmt.Sprintf("%s-%s", workCfg.ProjectName, featureName),
+		Branch:          branch,
+		Normalized:      featureName,
+		Created:         time.Now(),
+		Projects:        presetCfg.Projects,
+		Ports:           ports,
+		ComposeProjects: composeProjects,
 	}
 	if err := reg.Add(wt); err != nil {
 		checkError(err)
@@ -220,18 +227,12 @@ func runNewFeature(cmd *cobra.Command, args []string) {
 	ui.CheckMark("Registry updated")
 	ui.NewLine()
 
-	// Export environment variables
-	envVars := map[string]string{
-		"FEATURE_NAME":         featureName,
-		"COMPOSE_PROJECT_NAME": wt.ComposeProject,
+	// Prepare base environment variables (shared across all projects)
+	baseEnvVars := map[string]string{
+		"FEATURE_NAME": featureName,
 	}
 	for service, port := range ports {
-		envVars[service] = fmt.Sprintf("%d", port)
-	}
-
-	envList := os.Environ()
-	for key, value := range envVars {
-		envList = append(envList, fmt.Sprintf("%s=%s", key, value))
+		baseEnvVars[service] = fmt.Sprintf("%d", port)
 	}
 
 	// Start services for each project
@@ -247,6 +248,14 @@ func runNewFeature(cmd *cobra.Command, args []string) {
 		ui.Loading(fmt.Sprintf("Starting '%s' services...", projectName))
 
 		worktreePath := featureDir + "/" + project.Dir
+
+		// Build environment list with per-service COMPOSE_PROJECT_NAME
+		envList := os.Environ()
+		for key, value := range baseEnvVars {
+			envList = append(envList, fmt.Sprintf("%s=%s", key, value))
+		}
+		// Add service-specific compose project name
+		envList = append(envList, fmt.Sprintf("COMPOSE_PROJECT_NAME=%s", wt.GetComposeProject(projectName)))
 
 		// Replace placeholders in start command
 		startCmd := project.StartCommand
@@ -303,6 +312,14 @@ func runNewFeature(cmd *cobra.Command, args []string) {
 
 			worktreePath := featureDir + "/" + project.Dir
 			postCmd := project.PostCommand
+
+			// Build environment list with per-service COMPOSE_PROJECT_NAME
+			envList := os.Environ()
+			for key, value := range baseEnvVars {
+				envList = append(envList, fmt.Sprintf("%s=%s", key, value))
+			}
+			// Add service-specific compose project name
+			envList = append(envList, fmt.Sprintf("COMPOSE_PROJECT_NAME=%s", wt.GetComposeProject(projectName)))
 
 			cmd := exec.Command("sh", "-c", postCmd)
 			cmd.Dir = worktreePath

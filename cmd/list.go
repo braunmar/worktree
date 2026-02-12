@@ -23,8 +23,7 @@ var listCmd = &cobra.Command{
 Shows:
 - Feature name
 - Branch name
-- Backend status (clean/modified)
-- Frontend status (clean/modified)
+- Project status for each configured project (clean/modified)
 - Running status
 - Port mapping
 
@@ -83,20 +82,17 @@ func runList(cmd *cobra.Command, args []string) {
 			continue
 		}
 
-		// Get worktree information
-		backendWorktree := cfg.WorktreeBackendPath(featureName)
-		frontendWorktree := cfg.WorktreeFrontendPath(featureName)
+		featureDir := cfg.WorktreeFeaturePath(featureName)
 
-		backendBranch := wt.Branch
-		if branchName, err := git.GetWorktreeBranch(backendWorktree); err == nil {
-			backendBranch = branchName
+		// Get branch name from first project
+		displayBranch := wt.Branch
+		if len(wt.Projects) > 0 {
+			firstProject := workCfg.Projects[wt.Projects[0]]
+			firstWorktreePath := featureDir + "/" + firstProject.Dir
+			if branchName, err := git.GetWorktreeBranch(firstWorktreePath); err == nil {
+				displayBranch = branchName
+			}
 		}
-
-		backendChanges, _ := git.HasUncommittedChanges(backendWorktree)
-		backendCount, _ := git.GetUncommittedChangesCount(backendWorktree)
-
-		frontendChanges, _ := git.HasUncommittedChanges(frontendWorktree)
-		frontendCount, _ := git.GetUncommittedChangesCount(frontendWorktree)
 
 		// Check if feature is running
 		running := docker.IsFeatureRunning(workCfg.ProjectName, featureName)
@@ -104,21 +100,32 @@ func runList(cmd *cobra.Command, args []string) {
 		// Display feature information
 		fmt.Printf("Feature: %s\n", featureName)
 		fmt.Printf("  Path:     %s\n", filepath.Join("worktrees", featureName))
-		fmt.Printf("  Branch:   %s\n", backendBranch)
+		fmt.Printf("  Branch:   %s\n", displayBranch)
 		fmt.Printf("  Created:  %s\n", wt.Created.Format("2006-01-02 15:04"))
 
-		// Backend status
-		if backendChanges {
-			fmt.Printf("  Backend:  ⚠️  modified (%d uncommitted changes)\n", backendCount)
-		} else {
-			fmt.Printf("  Backend:  ✅ clean\n")
-		}
+		// Show status for each project
+		for _, projectName := range wt.Projects {
+			project, exists := workCfg.Projects[projectName]
+			if !exists {
+				continue
+			}
 
-		// Frontend status
-		if frontendChanges {
-			fmt.Printf("  Frontend: ⚠️  modified (%d uncommitted changes)\n", frontendCount)
-		} else {
-			fmt.Printf("  Frontend: ✅ clean\n")
+			worktreePath := featureDir + "/" + project.Dir
+
+			// Check if worktree exists
+			if _, err := os.Stat(worktreePath); os.IsNotExist(err) {
+				fmt.Printf("  %s: ⚠️  worktree not found\n", projectName)
+				continue
+			}
+
+			changes, _ := git.HasUncommittedChanges(worktreePath)
+			count, _ := git.GetUncommittedChangesCount(worktreePath)
+
+			if changes {
+				fmt.Printf("  %s: ⚠️  modified (%d uncommitted changes)\n", projectName, count)
+			} else {
+				fmt.Printf("  %s: ✅ clean\n", projectName)
+			}
 		}
 
 		// Running status

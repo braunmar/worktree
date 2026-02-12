@@ -98,18 +98,12 @@ func runStart(cmd *cobra.Command, args []string) {
 	}
 	ui.NewLine()
 
-	// Export environment variables
-	envVars := map[string]string{
-		"FEATURE_NAME":         featureName,
-		"COMPOSE_PROJECT_NAME": wt.ComposeProject,
+	// Prepare base environment variables (shared across all projects)
+	baseEnvVars := map[string]string{
+		"FEATURE_NAME": featureName,
 	}
 	for service, port := range wt.Ports {
-		envVars[service] = fmt.Sprintf("%d", port)
-	}
-
-	envList := os.Environ()
-	for key, value := range envVars {
-		envList = append(envList, fmt.Sprintf("%s=%s", key, value))
+		baseEnvVars[service] = fmt.Sprintf("%d", port)
 	}
 
 	featureDir := cfg.WorktreeFeaturePath(featureName)
@@ -128,6 +122,14 @@ func runStart(cmd *cobra.Command, args []string) {
 		// Start services
 		ui.Loading(fmt.Sprintf("Starting %s...", projectName))
 		ui.NewLine()
+
+		// Build environment list with per-service COMPOSE_PROJECT_NAME
+		envList := os.Environ()
+		for key, value := range baseEnvVars {
+			envList = append(envList, fmt.Sprintf("%s=%s", key, value))
+		}
+		// Add service-specific compose project name
+		envList = append(envList, fmt.Sprintf("COMPOSE_PROJECT_NAME=%s", wt.GetComposeProject(projectName)))
 
 		// Execute start command via shell
 		shellCmd := exec.Command("sh", "-c", project.StartCommand)

@@ -19,9 +19,12 @@ var rebaseCmd = &cobra.Command{
 	Long: `Update main branch from origin and rebase the feature branch on top of it.
 
 This command:
-1. Updates main branch in backend and frontend repos (git pull origin main)
-2. Rebases the feature worktree branches on top of updated main
-3. Shows status and any conflicts that need resolution
+1. Checks for uncommitted changes in all project worktrees
+2. Updates main branch in all project repositories (git pull origin main)
+3. Rebases the feature worktree branches on top of updated main
+4. Shows status and any conflicts that need resolution
+
+Works with any projects defined in your .worktree.yml configuration.
 
 The feature name is automatically normalized, so you can use either:
 - The normalized feature name: feature-user-auth
@@ -75,78 +78,106 @@ func runRebase(cmd *cobra.Command, args []string) {
 	ui.PrintStatusLine("Branch", wt.Branch)
 	ui.NewLine()
 
-	backendWorktree := cfg.WorktreeBackendPath(featureName)
-	frontendWorktree := cfg.WorktreeFrontendPath(featureName)
+	// Get list of projects from the worktree
+	projects := wt.Projects
+	if len(projects) == 0 {
+		ui.Error("No projects found in worktree")
+		os.Exit(1)
+	}
 
-	// Check for uncommitted changes
-	backendChanges, _ := git.HasUncommittedChanges(backendWorktree)
-	frontendChanges, _ := git.HasUncommittedChanges(frontendWorktree)
+	featureDir := cfg.WorktreeFeaturePath(featureName)
 
-	if backendChanges || frontendChanges {
+	// Check for uncommitted changes in all projects
+	hasUncommittedChanges := false
+	for _, projectName := range projects {
+		project, exists := workCfg.Projects[projectName]
+		if !exists {
+			ui.Warning(fmt.Sprintf("Project '%s' not found in configuration, skipping", projectName))
+			continue
+		}
+
+		worktreePath := featureDir + "/" + project.Dir
+
+		// Check if worktree exists
+		if _, err := os.Stat(worktreePath); os.IsNotExist(err) {
+			ui.Warning(fmt.Sprintf("Worktree for %s does not exist: %s", projectName, worktreePath))
+			continue
+		}
+
+		changes, _ := git.HasUncommittedChanges(worktreePath)
+		if changes {
+			hasUncommittedChanges = true
+			count, _ := git.GetUncommittedChangesCount(worktreePath)
+			ui.PrintStatusLine(projectName, fmt.Sprintf("%d uncommitted changes", count))
+		}
+	}
+
+	if hasUncommittedChanges {
+		ui.NewLine()
 		ui.Error("Cannot rebase with uncommitted changes")
-		if backendChanges {
-			count, _ := git.GetUncommittedChangesCount(backendWorktree)
-			ui.PrintStatusLine("Backend", fmt.Sprintf("%d uncommitted changes", count))
-		}
-		if frontendChanges {
-			count, _ := git.GetUncommittedChangesCount(frontendWorktree)
-			ui.PrintStatusLine("Frontend", fmt.Sprintf("%d uncommitted changes", count))
-		}
 		ui.NewLine()
 		ui.Info("💡 Commit or stash your changes before rebasing")
 		os.Exit(1)
 	}
 
-	// Get main branch names from config
-	backendMainBranch := "main" // default
-	frontendMainBranch := "main" // default
-	if backendCfg, exists := workCfg.Projects["backend"]; exists && backendCfg.MainBranch != "" {
-		backendMainBranch = backendCfg.MainBranch
-	}
-	if frontendCfg, exists := workCfg.Projects["frontend"]; exists && frontendCfg.MainBranch != "" {
-		frontendMainBranch = frontendCfg.MainBranch
-	}
+	// Step 1: Update main branch in all project repositories
+	ui.Section("Updating main branches...")
+	for _, projectName := range projects {
+		project, exists := workCfg.Projects[projectName]
+		if !exists {
+			continue
+		}
 
-	// Step 1: Update main branch in backend
-	ui.Info(fmt.Sprintf("📥 Updating backend %s branch...", backendMainBranch))
-	if err := updateMainBranch(cfg.BackendDir, backendMainBranch); err != nil {
-		ui.Error(fmt.Sprintf("Failed to update backend %s: %v", backendMainBranch, err))
-		os.Exit(1)
-	}
-	ui.CheckMark(fmt.Sprintf("Backend %s updated", backendMainBranch))
+		// Get main branch name from config (default to "main")
+		mainBranch := "main"
+		if project.MainBranch != "" {
+			mainBranch = project.MainBranch
+		}
 
-	// Step 2: Update main branch in frontend
-	ui.Info(fmt.Sprintf("📥 Updating frontend %s branch...", frontendMainBranch))
-	if err := updateMainBranch(cfg.FrontendDir, frontendMainBranch); err != nil {
-		ui.Error(fmt.Sprintf("Failed to update frontend %s: %v", frontendMainBranch, err))
-		os.Exit(1)
+		projectDir := cfg.ProjectRoot + "/" + project.Dir
+
+		ui.Info(fmt.Sprintf("📥 Updating %s %s branch...", projectName, mainBranch))
+		if err := updateMainBranch(projectDir, mainBranch); err != nil {
+			ui.Error(fmt.Sprintf("Failed to update %s %s: %v", projectName, mainBranch, err))
+			os.Exit(1)
+		}
+		ui.CheckMark(fmt.Sprintf("%s %s updated", projectName, mainBranch))
 	}
-	ui.CheckMark(fmt.Sprintf("Frontend %s updated", frontendMainBranch))
 	ui.NewLine()
 
-	// Step 3: Rebase backend worktree
-	ui.Info("🔄 Rebasing backend branch...")
-	if err := rebaseBranch(backendWorktree, wt.Branch, backendMainBranch); err != nil {
-		ui.Error(fmt.Sprintf("Backend rebase failed: %v", err))
-		ui.NewLine()
-		ui.Info("💡 Resolve conflicts in:")
-		ui.Info(fmt.Sprintf("   %s", backendWorktree))
-		ui.Info("💡 Then run: git -C " + backendWorktree + " rebase --continue")
-		os.Exit(1)
-	}
-	ui.CheckMark("Backend rebased successfully")
+	// Step 2: Rebase all project worktrees
+	ui.Section("Rebasing worktrees...")
+	for _, projectName := range projects {
+		project, exists := workCfg.Projects[projectName]
+		if !exists {
+			continue
+		}
 
-	// Step 4: Rebase frontend worktree
-	ui.Info("🔄 Rebasing frontend branch...")
-	if err := rebaseBranch(frontendWorktree, wt.Branch, frontendMainBranch); err != nil {
-		ui.Error(fmt.Sprintf("Frontend rebase failed: %v", err))
-		ui.NewLine()
-		ui.Info("💡 Resolve conflicts in:")
-		ui.Info(fmt.Sprintf("   %s", frontendWorktree))
-		ui.Info("💡 Then run: git -C " + frontendWorktree + " rebase --continue")
-		os.Exit(1)
+		// Get main branch name from config (default to "main")
+		mainBranch := "main"
+		if project.MainBranch != "" {
+			mainBranch = project.MainBranch
+		}
+
+		worktreePath := featureDir + "/" + project.Dir
+
+		// Check if worktree exists
+		if _, err := os.Stat(worktreePath); os.IsNotExist(err) {
+			ui.Warning(fmt.Sprintf("Worktree for %s does not exist, skipping", projectName))
+			continue
+		}
+
+		ui.Info(fmt.Sprintf("🔄 Rebasing %s branch...", projectName))
+		if err := rebaseBranch(worktreePath, wt.Branch, mainBranch); err != nil {
+			ui.Error(fmt.Sprintf("%s rebase failed: %v", projectName, err))
+			ui.NewLine()
+			ui.Info("💡 Resolve conflicts in:")
+			ui.Info(fmt.Sprintf("   %s", worktreePath))
+			ui.Info("💡 Then run: git -C " + worktreePath + " rebase --continue")
+			os.Exit(1)
+		}
+		ui.CheckMark(fmt.Sprintf("%s rebased successfully", projectName))
 	}
-	ui.CheckMark("Frontend rebased successfully")
 
 	ui.NewLine()
 	ui.Success("✨ Rebase completed successfully!")

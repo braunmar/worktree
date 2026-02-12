@@ -19,12 +19,23 @@ const (
 
 // Worktree represents a single worktree instance
 type Worktree struct {
-	Branch         string            `json:"branch"`
-	Normalized     string            `json:"normalized"`
-	Created        time.Time         `json:"created"`
-	Projects       []string          `json:"projects"`
-	Ports          map[string]int    `json:"ports"`
-	ComposeProject string            `json:"compose_project"`
+	Branch          string            `json:"branch"`
+	Normalized      string            `json:"normalized"`
+	Created         time.Time         `json:"created"`
+	Projects        []string          `json:"projects"`
+	Ports           map[string]int    `json:"ports"`
+	ComposeProject  string            `json:"compose_project,omitempty"`  // Deprecated: use ComposeProjects
+	ComposeProjects map[string]string `json:"compose_projects,omitempty"` // Per-service compose project names
+}
+
+// GetComposeProject returns the compose project name for a specific service
+// Falls back to the legacy ComposeProject field if per-service names are not set
+func (w *Worktree) GetComposeProject(service string) string {
+	if w.ComposeProjects != nil && w.ComposeProjects[service] != "" {
+		return w.ComposeProjects[service]
+	}
+	// Fallback to legacy single compose project name
+	return w.ComposeProject
 }
 
 // Registry manages all worktree instances and port allocations
