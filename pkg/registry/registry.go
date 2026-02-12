@@ -188,7 +188,12 @@ func (r *Registry) FindAvailablePort(service string) (int, error) {
 
 	portRange, ok := r.PortRanges[service]
 	if !ok {
-		return 0, fmt.Errorf("unknown service: %s", service)
+		// List available services for better error message
+		availableServices := make([]string, 0, len(r.PortRanges))
+		for svc := range r.PortRanges {
+			availableServices = append(availableServices, svc)
+		}
+		return 0, fmt.Errorf("unknown service: %s\nAvailable services: %v", service, availableServices)
 	}
 
 	minPort, maxPort := portRange[0], portRange[1]
@@ -208,7 +213,20 @@ func (r *Registry) FindAvailablePort(service string) (int, error) {
 		}
 	}
 
-	return 0, fmt.Errorf("no available ports in range %d-%d for service %s", minPort, maxPort, service)
+	// Build detailed error message showing what's allocated
+	allocatedInfo := make([]string, 0)
+	for _, wt := range r.Worktrees {
+		if port, ok := wt.Ports[service]; ok {
+			allocatedInfo = append(allocatedInfo, fmt.Sprintf("%s: %d", wt.Normalized, port))
+		}
+	}
+
+	errorMsg := fmt.Sprintf("no available ports in range %d-%d for service %s", minPort, maxPort, service)
+	if len(allocatedInfo) > 0 {
+		errorMsg += fmt.Sprintf("\nCurrently allocated:\n  %s", strings.Join(allocatedInfo, "\n  "))
+	}
+
+	return 0, fmt.Errorf(errorMsg)
 }
 
 // AllocatePorts allocates ports for all specified services

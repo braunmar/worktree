@@ -48,22 +48,35 @@ func init() {
 
 func runRemove(cmd *cobra.Command, args []string) {
 	input := args[0]
+	verbose, _ := cmd.Flags().GetBool("verbose")
 
 	// Normalize the input to match behavior of new-feature command
 	// This allows users to use either the normalized name or the original branch name
 	featureName := registry.NormalizeBranchName(input)
+	if verbose {
+		ui.Info(fmt.Sprintf("Normalized input '%s' to feature name '%s'", input, featureName))
+	}
 
 	// Get configuration
 	cfg, err := config.New()
 	checkError(err)
+	if verbose {
+		ui.Info(fmt.Sprintf("Loaded configuration from: %s", cfg.ProjectRoot))
+	}
 
 	// Load worktree configuration
 	workCfg, err := config.LoadWorktreeConfig(cfg.ProjectRoot)
 	checkError(err)
+	if verbose {
+		ui.Info(fmt.Sprintf("Loaded worktree configuration with %d projects", len(workCfg.Projects)))
+	}
 
 	// Load registry
 	reg, err := registry.Load(cfg.WorktreeDir, workCfg)
 	checkError(err)
+	if verbose {
+		ui.Info(fmt.Sprintf("Loaded registry with %d worktrees", len(reg.Worktrees)))
+	}
 
 	// Get worktree from registry
 	wt, exists := reg.Get(featureName)

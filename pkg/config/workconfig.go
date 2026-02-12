@@ -141,6 +141,42 @@ func (c *WorktreeConfig) Validate() error {
 		}
 	}
 
+	// Validate port ranges
+	for name, portCfg := range c.Ports {
+		if portCfg.Range != nil {
+			if portCfg.Range[0] < 1 || portCfg.Range[1] > 65535 {
+				return fmt.Errorf("port %s: range [%d, %d] outside valid range 1-65535",
+					name, portCfg.Range[0], portCfg.Range[1])
+			}
+			if portCfg.Range[0] >= portCfg.Range[1] {
+				return fmt.Errorf("port %s: invalid range [%d, %d] - min must be < max",
+					name, portCfg.Range[0], portCfg.Range[1])
+			}
+		}
+
+		// Validate port expressions are parseable
+		if portCfg.Port != "" && portCfg.Range != nil {
+			// Try to parse expression to catch syntax errors early
+			_, err := CalculatePort(portCfg.Port, 0)
+			if err != nil {
+				return fmt.Errorf("port %s: invalid expression '%s': %w",
+					name, portCfg.Port, err)
+			}
+		}
+	}
+
+	// Validate default_preset exists
+	if c.DefaultPreset != "" {
+		if _, exists := c.Presets[c.DefaultPreset]; !exists {
+			return fmt.Errorf("default_preset '%s' does not exist in presets map", c.DefaultPreset)
+		}
+	}
+
+	// Validate hostname
+	if c.Hostname == "" {
+		c.Hostname = "localhost"
+	}
+
 	return nil
 }
 
@@ -182,45 +218,124 @@ func ReplaceInstancePlaceholder(command string, instance int) string {
 	return strings.ReplaceAll(command, "{instance}", fmt.Sprintf("%d", instance))
 }
 
-// CalculatePort evaluates a port expression like "3000 + {instance}" or "4510 + {instance} * 50"
-func CalculatePort(expression string, instance int) int {
-	// Replace {instance} with actual value
-	expr := strings.ReplaceAll(expression, "{instance}", fmt.Sprintf("%d", instance))
+// portExpression represents a parsed port expression
+type portExpression struct {
+	base       int
+	hasOffset  bool
+	offset     int
+	hasMult    bool
+	multiplier int
+}
+
+// parseExpression parses port expressions into structured format
+// Supports formats: "3000", "3000 + 5", "3000 + 2 * 50"
+func parseExpression(expr string) (*portExpression, error) {
 	expr = strings.TrimSpace(expr)
+	result := &portExpression{}
 
 	// Handle "base + value * multiplier" format (e.g., "4510 + 2 * 50")
 	if strings.Contains(expr, "+") && strings.Contains(expr, "*") {
 		parts := strings.Split(expr, "+")
-		if len(parts) == 2 {
-			var base int
-			fmt.Sscanf(strings.TrimSpace(parts[0]), "%d", &base)
-
-			// Parse multiplication in second part
-			multParts := strings.Split(strings.TrimSpace(parts[1]), "*")
-			if len(multParts) == 2 {
-				var factor1, factor2 int
-				fmt.Sscanf(strings.TrimSpace(multParts[0]), "%d", &factor1)
-				fmt.Sscanf(strings.TrimSpace(multParts[1]), "%d", &factor2)
-				return base + (factor1 * factor2)
-			}
+		if len(parts) != 2 {
+			return nil, fmt.Errorf("invalid expression format: expected 'base + offset * multiplier'")
 		}
+
+		var base int
+		n, err := fmt.Sscanf(strings.TrimSpace(parts[0]), "%d", &base)
+		if err != nil || n != 1 {
+			return nil, fmt.Errorf("failed to parse base port: %w", err)
+		}
+		result.base = base
+
+		// Parse multiplication in second part
+		multParts := strings.Split(strings.TrimSpace(parts[1]), "*")
+		if len(multParts) != 2 {
+			return nil, fmt.Errorf("invalid multiplication format: expected 'factor1 * factor2'")
+		}
+
+		var factor1, factor2 int
+		n1, err1 := fmt.Sscanf(strings.TrimSpace(multParts[0]), "%d", &factor1)
+		if err1 != nil || n1 != 1 {
+			return nil, fmt.Errorf("failed to parse first factor: %w", err1)
+		}
+		n2, err2 := fmt.Sscanf(strings.TrimSpace(multParts[1]), "%d", &factor2)
+		if err2 != nil || n2 != 1 {
+			return nil, fmt.Errorf("failed to parse second factor: %w", err2)
+		}
+		result.hasOffset = true
+		result.hasMult = true
+		result.offset = factor1
+		result.multiplier = factor2
+		return result, nil
 	}
 
 	// Handle simple "base + offset" format
 	if strings.Contains(expr, "+") {
 		parts := strings.Split(expr, "+")
-		if len(parts) == 2 {
-			var base, offset int
-			fmt.Sscanf(strings.TrimSpace(parts[0]), "%d", &base)
-			fmt.Sscanf(strings.TrimSpace(parts[1]), "%d", &offset)
-			return base + offset
+		if len(parts) != 2 {
+			return nil, fmt.Errorf("invalid expression format: expected 'base + offset'")
 		}
+
+		var base, offset int
+		n1, err1 := fmt.Sscanf(strings.TrimSpace(parts[0]), "%d", &base)
+		if err1 != nil || n1 != 1 {
+			return nil, fmt.Errorf("failed to parse base port: %w", err1)
+		}
+		n2, err2 := fmt.Sscanf(strings.TrimSpace(parts[1]), "%d", &offset)
+		if err2 != nil || n2 != 1 {
+			return nil, fmt.Errorf("failed to parse offset: %w", err2)
+		}
+		result.base = base
+		result.hasOffset = true
+		result.offset = offset
+		return result, nil
 	}
 
 	// Just a number
 	var port int
-	fmt.Sscanf(expr, "%d", &port)
-	return port
+	n, err := fmt.Sscanf(expr, "%d", &port)
+	if err != nil || n != 1 {
+		return nil, fmt.Errorf("failed to parse port number: %w", err)
+	}
+	result.base = port
+	return result, nil
+}
+
+// calculateFromExpression calculates the final port value from a parsed expression
+func (pe *portExpression) calculateFromExpression() (int, error) {
+	var result int
+	if pe.hasMult {
+		result = pe.base + (pe.offset * pe.multiplier)
+	} else if pe.hasOffset {
+		result = pe.base + pe.offset
+	} else {
+		result = pe.base
+	}
+
+	if result < 1 || result > 65535 {
+		return 0, fmt.Errorf("calculated port %d is out of valid range (1-65535)", result)
+	}
+	return result, nil
+}
+
+// CalculatePort evaluates a port expression like "3000 + {instance}" or "4510 + {instance} * 50"
+func CalculatePort(expression string, instance int) (int, error) {
+	// Replace {instance} with actual value
+	expr := strings.ReplaceAll(expression, "{instance}", fmt.Sprintf("%d", instance))
+
+	// Parse the expression
+	parsed, err := parseExpression(expr)
+	if err != nil {
+		return 0, fmt.Errorf("failed to parse expression '%s': %w", expression, err)
+	}
+
+	// Calculate the final port value
+	result, err := parsed.calculateFromExpression()
+	if err != nil {
+		return 0, fmt.Errorf("invalid port for expression '%s': %w", expression, err)
+	}
+
+	return result, nil
 }
 
 // GetPortURL generates the URL for a port configuration
@@ -231,10 +346,16 @@ func (pc *PortConfig) GetURL(hostname string, port int) string {
 }
 
 // GetValue calculates the value for this port config (either port or string template)
+// Returns empty string if port calculation fails
 func (pc *PortConfig) GetValue(instance int) string {
 	if pc.Port != "" {
 		// Port calculation
-		port := CalculatePort(pc.Port, instance)
+		port, err := CalculatePort(pc.Port, instance)
+		if err != nil {
+			// Log error but don't crash - return empty string
+			// Caller should validate port configurations during startup
+			return ""
+		}
 		return fmt.Sprintf("%d", port)
 	} else if pc.Value != "" {
 		// String template (e.g., "myproject-inst{instance}")
@@ -285,8 +406,8 @@ func (pc *PortConfig) GetPortRange() *[2]int {
 
 	// 2. If port expression exists, extract base and calculate range
 	if pc.Port != "" {
-		base := ExtractBasePort(pc.Port)
-		if base > 0 {
+		base, err := ExtractBasePort(pc.Port)
+		if err == nil && base > 0 {
 			return &[2]int{base, base + 100} // Default: 100 port range
 		}
 	}
@@ -296,21 +417,22 @@ func (pc *PortConfig) GetPortRange() *[2]int {
 }
 
 // ExtractBasePort extracts base port from expressions like "3000 + {instance}"
-func ExtractBasePort(expr string) int {
-	// Handle "base + {instance}" format
-	if strings.Contains(expr, "+") {
-		parts := strings.Split(expr, "+")
-		if len(parts) >= 1 {
-			var base int
-			fmt.Sscanf(strings.TrimSpace(parts[0]), "%d", &base)
-			return base
-		}
+func ExtractBasePort(expr string) (int, error) {
+	// Replace {instance} with 0 to get base port
+	cleanedExpr := strings.ReplaceAll(expr, "{instance}", "0")
+
+	// Parse the expression
+	parsed, err := parseExpression(cleanedExpr)
+	if err != nil {
+		return 0, fmt.Errorf("failed to parse expression '%s': %w", expr, err)
 	}
 
-	// Handle plain number
-	var port int
-	fmt.Sscanf(strings.TrimSpace(expr), "%d", &port)
-	return port
+	// Validate base port is in range
+	if parsed.base < 1 || parsed.base > 65535 {
+		return 0, fmt.Errorf("base port %d is out of valid range (1-65535) in expression '%s'", parsed.base, expr)
+	}
+
+	return parsed.base, nil
 }
 
 // GetServiceURL returns the formatted URL for a service by port env name

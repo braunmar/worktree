@@ -88,102 +88,173 @@ copies:
   #   target: "config.yml"
 
 # Port/Service display configuration
-# Customize what services are shown after setup
-# IMPORTANT: All services must define port ranges - there are no hardcoded defaults
-# Each service needs: name (for display), url (template), port (base), and range (for allocation)
+# Customize what services are shown after setup and how ports are allocated
+#
+# PORT EXPRESSION SYNTAX:
+# Ports support dynamic calculation using {instance} placeholder:
+#
+# 1. Simple offset (most common):
+#    port: "3000 + {instance}"
+#    → Instance 0: 3000, Instance 1: 3001, Instance 2: 3002, etc.
+#
+# 2. Multiplication (for port ranges like LocalStack):
+#    port: "4510 + {instance} * 50"
+#    → Instance 0: 4510, Instance 1: 4560, Instance 2: 4610, etc.
+#    Use this when each instance needs a block of ports (e.g., 50 ports for LocalStack)
+#
+# 3. Static value (same port for all instances):
+#    port: "8080"
+#    → Always 8080 (use only if service doesn't conflict across instances)
+#
+# VALIDATION REQUIREMENTS:
+# - Port expressions must evaluate to integers in range 1-65535
+# - The {instance} placeholder is replaced with the instance number (0, 1, 2, ...)
+# - Expression evaluation happens once at feature creation time
+# - Results are stored in the registry for consistent allocation
+#
+# COMMON PATTERNS:
+# - Frontend/Backend: Simple offset (3000 + {instance})
+# - Databases: Simple offset (5432 + {instance}, 3306 + {instance})
+# - Service ranges: Multiplication (4510 + {instance} * 50)
+# - Shared services: Static value ("8080") - use with caution!
+#
+# Each service definition needs:
+# - name: Display name for UI
+# - url: URL template with {host} and {port} placeholders
+# - port: Port expression (see syntax above)
+#
 ports:
-  # Frontend example
+  # Frontend example - Simple offset pattern
+  # Each instance gets consecutive port: 3000, 3001, 3002, ...
   frontend:
     name: "Frontend"
     url: "http://{host}:{port}"
-    port: "3000 + {instance}"    # Expression: base + instance
+    port: "3000 + {instance}"
 
-  # Backend API
+  # Backend API - Simple offset pattern
+  # Shares same port pattern as frontend for simplicity
   backend:
     name: "Backend API"
     url: "http://{host}:{port}"
     port: "8080 + {instance}"
 
   # API documentation (Swagger, ReDoc, etc.)
+  # Often runs on same port as backend, just different path
   docs:
     name: "API Docs"
     url: "http://{host}:{port}/docs"
-    port: "8080 + {instance}"
+    port: "8080 + {instance}"      # Same as backend if served by backend
 
-  # Database examples
+  # Database examples - Simple offset pattern
+  # Each database type typically uses consecutive ports
   postgres:
     name: "PostgreSQL"
     url: "{host}:{port}"
-    port: "5432 + {instance}"
+    port: "5432 + {instance}"      # Standard PostgreSQL port + offset
 
   mysql:
     name: "MySQL"
     url: "{host}:{port}"
-    port: "3306 + {instance}"
+    port: "3306 + {instance}"      # Standard MySQL port + offset
 
   mongo:
     name: "MongoDB"
     url: "mongodb://{host}:{port}"
-    port: "27017 + {instance}"
+    port: "27017 + {instance}"     # Standard MongoDB port + offset
 
   redis:
     name: "Redis"
     url: "redis://{host}:{port}"
-    port: "6379 + {instance}"
+    port: "6379 + {instance}"      # Standard Redis port + offset
 
-  # Message queues
+  # Message queues - Simple offset pattern
   rabbitmq:
     name: "RabbitMQ"
     url: "http://{host}:{port}"
-    port: "15672 + {instance}"    # Management UI
+    port: "15672 + {instance}"    # Management UI port (standard 15672 + offset)
 
   kafka:
     name: "Kafka"
     url: "{host}:{port}"
-    port: "9092 + {instance}"
+    port: "9092 + {instance}"     # Standard Kafka port + offset
 
-  # Monitoring & Debugging
+  # Monitoring & Debugging - Simple offset pattern
   grafana:
     name: "Grafana"
     url: "http://{host}:{port}"
-    port: "3001 + {instance}"
+    port: "3001 + {instance}"     # 3001 to avoid conflict with frontend on 3000
 
   prometheus:
     name: "Prometheus"
     url: "http://{host}:{port}"
-    port: "9090 + {instance}"
+    port: "9090 + {instance}"     # Standard Prometheus port + offset
 
   jaeger:
     name: "Jaeger"
     url: "http://{host}:{port}"
-    port: "16686 + {instance}"
+    port: "16686 + {instance}"    # Jaeger UI port + offset
 
-  # Development tools
+  # Development tools - Simple offset pattern
   mailcatcher:
     name: "Mail"
     url: "http://{host}:{port}"
-    port: "1080 + {instance}"
+    port: "1080 + {instance}"     # Mailcatcher web UI port + offset
 
   adminer:
     name: "Adminer"
     url: "http://{host}:{port}"
-    port: "8080 + {instance}"
+    port: "8082 + {instance}"     # Offset to avoid conflict with backend
 
-  # AWS LocalStack
+  # AWS LocalStack - Port range pattern
+  # LocalStack needs a range of ports for different services
+  # Main gateway port (edge port)
   localstack:
     name: "LocalStack"
     url: "http://{host}:{port}"
-    port: "4566 + {instance}"
+    port: "4566 + {instance}"     # Main LocalStack edge port
 
-  # gRPC services
+  # LocalStack extended port range (if needed)
+  # Use multiplication pattern when service needs multiple consecutive ports
+  localstack_ext_start:
+    name: "LocalStack Range Start"
+    url: ""                       # No direct URL for range markers
+    port: "4510 + {instance} * 50"  # Each instance gets 50-port block
+                                    # Instance 0: 4510-4559
+                                    # Instance 1: 4560-4609
+                                    # Instance 2: 4610-4659
+
+  # gRPC services - Simple offset pattern
   grpc:
     name: "gRPC"
     url: "{host}:{port}"
-    port: "50051 + {instance}"
+    port: "50051 + {instance}"    # Standard gRPC port + offset
 
-# Notes:
-# - Port configuration is now managed by the registry system
-# - The registry finds available ports dynamically for each feature
-# - Environment variables (FE_PORT, BE_PORT, etc.) are set automatically
-# - Your commands should use these environment variables directly
-# - No need for instance-based calculations anymore
+# IMPORTANT NOTES:
+#
+# 1. PORT ALLOCATION STRATEGY:
+#    - Port expressions are evaluated once when creating a feature
+#    - Results are stored in registry for consistent allocation
+#    - The {instance} value comes from the feature's APP_PORT allocation
+#    - Registry ensures no port conflicts between features
+#
+# 2. ENVIRONMENT VARIABLES:
+#    - Each port in this config becomes an environment variable
+#    - Variable name is the port key in UPPERCASE
+#    - Example: "frontend" → FE_PORT environment variable
+#    - These are automatically set when running start_command and post_command
+#
+# 3. ADDING NEW SERVICES:
+#    - Choose appropriate pattern (simple offset vs multiplication)
+#    - Ensure base port + (max_instances * increment) doesn't exceed 65535
+#    - Test with multiple instances to verify no conflicts
+#    - Consider standard ports to make debugging easier
+#
+# 4. VALIDATION:
+#    - worktree manager validates expressions at startup
+#    - Use 'worktree doctor' to check for port conflicts
+#    - Use 'worktree ports' to see all allocations
+#
+# 5. MIGRATION FROM HARDCODED PORTS:
+#    - Replace hardcoded ports in docker-compose.yml with ${PORT_VAR}
+#    - Update scripts to use environment variables
+#    - Test with 'worktree new-feature' to verify allocation works

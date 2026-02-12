@@ -19,6 +19,7 @@ import (
 var (
 	preset       string
 	noFixturesNF bool
+	dryRun       bool
 )
 
 var newFeatureCmd = &cobra.Command{
@@ -46,6 +47,7 @@ Examples:
 
 func init() {
 	newFeatureCmd.Flags().BoolVar(&noFixturesNF, "no-fixtures", false, "skip running fixtures")
+	newFeatureCmd.Flags().BoolVar(&dryRun, "dry-run", false, "preview changes without creating anything")
 }
 
 func runNewFeature(cmd *cobra.Command, args []string) {
@@ -55,16 +57,27 @@ func runNewFeature(cmd *cobra.Command, args []string) {
 		presetName = args[1]
 	}
 
+	verbose, _ := cmd.Flags().GetBool("verbose")
+
 	// Normalize branch name to feature name
 	featureName := registry.NormalizeBranchName(branch)
+	if verbose {
+		ui.Info(fmt.Sprintf("Normalized branch '%s' to feature name '%s'", branch, featureName))
+	}
 
 	// Get configuration
 	cfg, err := config.New()
 	checkError(err)
+	if verbose {
+		ui.Info(fmt.Sprintf("Loaded configuration from: %s", cfg.ProjectRoot))
+	}
 
 	// Load worktree configuration
 	workCfg, err := config.LoadWorktreeConfig(cfg.ProjectRoot)
 	checkError(err)
+	if verbose {
+		ui.Info(fmt.Sprintf("Loaded worktree configuration with %d projects", len(workCfg.Projects)))
+	}
 
 	// Get preset
 	presetCfg, err := workCfg.GetPreset(presetName)
@@ -87,22 +100,39 @@ func runNewFeature(cmd *cobra.Command, args []string) {
 	// Load registry
 	reg, err := registry.Load(cfg.WorktreeDir, workCfg)
 	checkError(err)
+	if verbose {
+		ui.Info(fmt.Sprintf("Loaded registry from: %s", cfg.WorktreeDir))
+		ui.Info(fmt.Sprintf("Found %d existing worktrees", len(reg.Worktrees)))
+	}
 
 	// Allocate ports for all services
 	ui.Section("Allocating ports...")
 	services := workCfg.GetPortServiceNames()
+	if verbose {
+		ui.Info(fmt.Sprintf("Services requiring ports: %v", services))
+	}
 	ports, err := reg.AllocatePorts(services)
 	checkError(err)
+	if verbose {
+		ui.Info(fmt.Sprintf("Allocated ports: %v", ports))
+	}
 
 	// Calculate INSTANCE from allocated APP_PORT (base port is 8080)
 	appPortCfg := workCfg.Ports["APP_PORT"]
-	basePort := config.ExtractBasePort(appPortCfg.Port)
+	basePort, err := config.ExtractBasePort(appPortCfg.Port)
+	checkError(err)
 	instance := ports["APP_PORT"] - basePort
 
 	// Display allocated ports
 	ui.CheckMark("Ports allocated")
 	ui.Info(fmt.Sprintf("Instance: %d", instance))
 	ui.NewLine()
+
+	// If dry-run, display preview and exit
+	if dryRun {
+		displayDryRunPreview(featureName, instance, ports, workCfg, presetCfg, cfg)
+		os.Exit(0)
+	}
 
 	// Create feature directory
 	featureDir := cfg.WorktreeFeaturePath(featureName)
@@ -118,6 +148,10 @@ func runNewFeature(cmd *cobra.Command, args []string) {
 
 		projectDir := cfg.ProjectRoot + "/" + project.Dir
 		worktreePath := featureDir + "/" + project.Dir
+
+		if verbose {
+			ui.Info(fmt.Sprintf("Git worktree command: git worktree add %s %s", worktreePath, branch))
+		}
 
 		if err := git.CreateWorktree(projectDir, worktreePath, branch); err != nil {
 			checkError(fmt.Errorf("failed to create %s worktree: %w", projectName, err))
@@ -262,7 +296,13 @@ func runNewFeature(cmd *cobra.Command, args []string) {
 			envList = append(envList, fmt.Sprintf("%s=%s", key, value))
 		}
 		// Add service-specific compose project name
-		envList = append(envList, fmt.Sprintf("COMPOSE_PROJECT_NAME=%s", wt.GetComposeProject(projectName)))
+		composeProject := wt.GetComposeProject(projectName)
+		envList = append(envList, fmt.Sprintf("COMPOSE_PROJECT_NAME=%s", composeProject))
+
+		if verbose {
+			ui.Info(fmt.Sprintf("Starting %s with COMPOSE_PROJECT_NAME=%s", projectName, composeProject))
+			ui.Info(fmt.Sprintf("Start command: %s", project.StartCommand))
+		}
 
 		// Replace placeholders in start command
 		startCmd := project.StartCommand
@@ -377,4 +417,77 @@ func runNewFeature(cmd *cobra.Command, args []string) {
 	}
 
 	ui.NewLine()
+}
+
+// displayDryRunPreview shows what would be created without actually creating it
+func displayDryRunPreview(featureName string, instance int, ports map[string]int, workCfg *config.WorktreeConfig, presetCfg *config.PresetConfig, cfg *config.Config) {
+	ui.Section("🔍 Dry Run - Preview Mode")
+
+	// Port allocation preview
+	fmt.Println("Port Allocation:")
+	for service, port := range ports {
+		ui.CheckMark(fmt.Sprintf("%s: %d", service, port))
+	}
+	ui.NewLine()
+
+	// Instance and environment variables
+	fmt.Printf("Instance: %d\n", instance)
+	baseEnvVars := workCfg.ExportEnvVars(instance)
+	for key, value := range baseEnvVars {
+		ui.CheckMark(fmt.Sprintf("%s=%s", key, value))
+	}
+	ui.NewLine()
+
+	// Worktrees to be created
+	fmt.Println("Worktrees to create:")
+	featureDir := cfg.WorktreeFeaturePath(featureName)
+	for _, projectName := range presetCfg.Projects {
+		project := workCfg.Projects[projectName]
+		worktreePath := featureDir + "/" + project.Dir
+		ui.CheckMark(worktreePath)
+	}
+	ui.NewLine()
+
+	// Symlinks
+	if len(workCfg.Symlinks) > 0 {
+		fmt.Println("Symlinks to create:")
+		for _, link := range workCfg.Symlinks {
+			ui.CheckMark(fmt.Sprintf("%s -> %s", link.Target, link.Source))
+		}
+		ui.NewLine()
+	}
+
+	// Copies
+	if len(workCfg.Copies) > 0 {
+		fmt.Println("Files to copy:")
+		for _, copy := range workCfg.Copies {
+			ui.CheckMark(fmt.Sprintf("%s -> %s", copy.Source, copy.Target))
+		}
+		ui.NewLine()
+	}
+
+	// Services to start
+	fmt.Println("Services to start:")
+	for _, projectName := range presetCfg.Projects {
+		project := workCfg.Projects[projectName]
+		if project.StartCommand != "" {
+			ui.CheckMark(fmt.Sprintf("%s: %s", projectName, project.StartCommand))
+		}
+	}
+	ui.NewLine()
+
+	// Post commands
+	if workCfg.AutoFixtures && !noFixturesNF {
+		fmt.Println("Post-startup commands:")
+		for _, projectName := range presetCfg.Projects {
+			project := workCfg.Projects[projectName]
+			if project.PostCommand != "" {
+				ui.CheckMark(fmt.Sprintf("%s: %s", projectName, project.PostCommand))
+			}
+		}
+		ui.NewLine()
+	}
+
+	ui.Info("This is a dry run - no changes were made")
+	fmt.Println("💡 Run without --dry-run to create the feature")
 }

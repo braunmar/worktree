@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strings"
 
 	"worktree/pkg/config"
 	"worktree/pkg/registry"
@@ -40,25 +41,48 @@ func init() {
 
 func runStart(cmd *cobra.Command, args []string) {
 	featureName := args[0]
+	verbose, _ := cmd.Flags().GetBool("verbose")
 
 	// Get configuration
 	cfg, err := config.New()
 	checkError(err)
+	if verbose {
+		ui.Info(fmt.Sprintf("Loaded configuration from: %s", cfg.ProjectRoot))
+	}
 
 	// Load worktree configuration
 	workCfg, err := config.LoadWorktreeConfig(cfg.ProjectRoot)
 	checkError(err)
+	if verbose {
+		ui.Info(fmt.Sprintf("Loaded worktree configuration with %d projects", len(workCfg.Projects)))
+	}
 
 	// Load registry
 	reg, err := registry.Load(cfg.WorktreeDir, workCfg)
 	checkError(err)
+	if verbose {
+		ui.Info(fmt.Sprintf("Loaded registry from: %s", cfg.WorktreeDir))
+		ui.Info(fmt.Sprintf("Found %d existing worktrees", len(reg.Worktrees)))
+	}
 
 	// Get worktree from registry
 	wt, exists := reg.Get(featureName)
 	if !exists {
 		ui.Error(fmt.Sprintf("Feature worktree '%s' not found", featureName))
+
+		// Suggest similar names
+		allWorktrees := reg.List()
+		similar := findSimilarFeatures(featureName, allWorktrees)
+
+		if len(similar) > 0 {
+			fmt.Println("\nDid you mean:")
+			for _, name := range similar {
+				fmt.Printf("  - %s\n", name)
+			}
+		}
+
 		fmt.Println("\nAvailable features:")
-		for _, w := range reg.List() {
+		for _, w := range allWorktrees {
 			fmt.Printf("  - %s\n", w.Normalized)
 		}
 		os.Exit(1)
@@ -100,7 +124,8 @@ func runStart(cmd *cobra.Command, args []string) {
 
 	// Calculate instance from allocated APP_PORT in registry
 	appPortCfg := workCfg.Ports["APP_PORT"]
-	basePort := config.ExtractBasePort(appPortCfg.Port)
+	basePort, err := config.ExtractBasePort(appPortCfg.Port)
+	checkError(err)
 	instance := wt.Ports["APP_PORT"] - basePort
 
 	// Export all environment variables (includes allocated ports + calculated values like INSTANCE, LOCALSTACK_EXT_*)
@@ -135,7 +160,14 @@ func runStart(cmd *cobra.Command, args []string) {
 			envList = append(envList, fmt.Sprintf("%s=%s", key, value))
 		}
 		// Add service-specific compose project name
-		envList = append(envList, fmt.Sprintf("COMPOSE_PROJECT_NAME=%s", wt.GetComposeProject(projectName)))
+		composeProject := wt.GetComposeProject(projectName)
+		envList = append(envList, fmt.Sprintf("COMPOSE_PROJECT_NAME=%s", composeProject))
+
+		if verbose {
+			ui.Info(fmt.Sprintf("Starting %s with COMPOSE_PROJECT_NAME=%s", projectName, composeProject))
+			ui.Info(fmt.Sprintf("Start command: %s", project.StartCommand))
+			ui.Info(fmt.Sprintf("Working directory: %s", worktreePath))
+		}
 
 		// Execute start command via shell
 		shellCmd := exec.Command("sh", "-c", project.StartCommand)
@@ -183,4 +215,19 @@ func runStart(cmd *cobra.Command, args []string) {
 		ui.PrintStatusLine(name, url)
 	}
 	ui.NewLine()
+}
+
+// findSimilarFeatures finds feature names similar to the input using simple string matching
+func findSimilarFeatures(input string, worktrees []*registry.Worktree) []string {
+	similar := []string{}
+
+	for _, wt := range worktrees {
+		name := wt.Normalized
+		// Check if the input is a substring of the feature name
+		if len(input) >= 3 && strings.Contains(name, input) {
+			similar = append(similar, name)
+		}
+	}
+
+	return similar
 }

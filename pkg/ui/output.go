@@ -133,3 +133,13 @@ func PrintTable(col1, col2 string) {
 func NewLine() {
 	fmt.Println()
 }
+
+// Progress prints a progress indicator with current/total counts
+func Progress(current, total int, message string) {
+	fmt.Printf("%s %s... (%d/%d)\n", "⏳", message, current, total)
+}
+
+// ProgressWithName prints a progress indicator for a named item
+func ProgressWithName(current, total int, itemName, action string) {
+	fmt.Printf("%s %s %s... (%d/%d)\n", "⏳", action, itemName, current, total)
+}
