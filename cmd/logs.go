@@ -36,8 +36,12 @@ func runLogs(cmd *cobra.Command, args []string) {
 	cfg, err := config.New()
 	checkError(err)
 
+	// Load worktree configuration
+	workCfg, err := config.LoadWorktreeConfig(cfg.ProjectRoot)
+	checkError(err)
+
 	// Load registry
-	reg, err := registry.Load(cfg.WorktreeDir)
+	reg, err := registry.Load(cfg.WorktreeDir, workCfg)
 	checkError(err)
 
 	// Get worktree from registry

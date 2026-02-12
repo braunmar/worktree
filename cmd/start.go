@@ -45,8 +45,12 @@ func runStart(cmd *cobra.Command, args []string) {
 	cfg, err := config.New()
 	checkError(err)
 
+	// Load worktree configuration
+	workCfg, err := config.LoadWorktreeConfig(cfg.ProjectRoot)
+	checkError(err)
+
 	// Load registry
-	reg, err := registry.Load(cfg.WorktreeDir)
+	reg, err := registry.Load(cfg.WorktreeDir, workCfg)
 	checkError(err)
 
 	// Get worktree from registry
@@ -65,10 +69,6 @@ func runStart(cmd *cobra.Command, args []string) {
 		ui.Error(fmt.Sprintf("Feature directory not found: worktrees/%s", featureName))
 		os.Exit(1)
 	}
-
-	// Load worktree configuration
-	workCfg, err := config.LoadWorktreeConfig(cfg.ProjectRoot)
-	checkError(err)
 
 	// Get preset (from flag or use projects from registry)
 	var projects []string
@@ -92,10 +92,10 @@ func runStart(cmd *cobra.Command, args []string) {
 
 	// Show port mapping from registry
 	ui.Section("Port mapping:")
-	ui.PrintStatusLine("Frontend", fmt.Sprintf("http://localhost:%d", wt.Ports["FE_PORT"]))
-	ui.PrintStatusLine("Backend", fmt.Sprintf("http://localhost:%d", wt.Ports["BE_PORT"]))
-	ui.PrintStatusLine("PostgreSQL", fmt.Sprintf("localhost:%d", wt.Ports["POSTGRES_PORT"]))
-	ui.PrintStatusLine("Mailpit", fmt.Sprintf("http://localhost:%d", wt.Ports["MAILPIT_UI_PORT"]))
+	displayServices := workCfg.GetDisplayableServices(wt.Ports)
+	for name, url := range displayServices {
+		ui.PrintStatusLine(name, url)
+	}
 	ui.NewLine()
 
 	// Export environment variables
@@ -170,7 +170,9 @@ func runStart(cmd *cobra.Command, args []string) {
 	// Show final summary
 	ui.Success("All services started!")
 	ui.NewLine()
-	ui.PrintStatusLine("Frontend", fmt.Sprintf("http://localhost:%d", wt.Ports["FE_PORT"]))
-	ui.PrintStatusLine("Backend", fmt.Sprintf("http://localhost:%d", wt.Ports["BE_PORT"]))
+	displayServices = workCfg.GetDisplayableServices(wt.Ports)
+	for name, url := range displayServices {
+		ui.PrintStatusLine(name, url)
+	}
 	ui.NewLine()
 }

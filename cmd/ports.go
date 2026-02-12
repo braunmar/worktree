@@ -38,8 +38,12 @@ func runPorts(cmd *cobra.Command, args []string) {
 	cfg, err := config.New()
 	checkError(err)
 
+	// Load worktree configuration
+	workCfg, err := config.LoadWorktreeConfig(cfg.ProjectRoot)
+	checkError(err)
+
 	// Load registry
-	reg, err := registry.Load(cfg.WorktreeDir)
+	reg, err := registry.Load(cfg.WorktreeDir, workCfg)
 	checkError(err)
 
 	// Get worktree from registry
@@ -57,12 +61,15 @@ func runPorts(cmd *cobra.Command, args []string) {
 	ui.PrintHeader(fmt.Sprintf("Ports for Feature: %s", featureName))
 	ui.NewLine()
 
-	// Show ports from registry
-	ui.PrintStatusLine("Frontend", fmt.Sprintf("http://localhost:%d", wt.Ports["FE_PORT"]))
-	ui.PrintStatusLine("Backend", fmt.Sprintf("http://localhost:%d", wt.Ports["BE_PORT"]))
-	ui.PrintStatusLine("PostgreSQL", fmt.Sprintf("localhost:%d", wt.Ports["POSTGRES_PORT"]))
-	ui.PrintStatusLine("Mailpit UI", fmt.Sprintf("http://localhost:%d", wt.Ports["MAILPIT_UI_PORT"]))
-	ui.PrintStatusLine("Mailpit SMTP", fmt.Sprintf("localhost:%d", wt.Ports["MAILPIT_SMTP_PORT"]))
-	ui.PrintStatusLine("LocalStack", fmt.Sprintf("http://localhost:%d", wt.Ports["LOCALSTACK_PORT"]))
+	// Show ports from registry dynamically
+	displayServices := workCfg.GetDisplayableServices(wt.Ports)
+	for name, url := range displayServices {
+		ui.PrintStatusLine(name, url)
+	}
+
+	// Show additional ports that have port numbers but no URL
+	if port, exists := wt.Ports["MAILPIT_SMTP_PORT"]; exists {
+		ui.PrintStatusLine("Mailpit SMTP", fmt.Sprintf("%s:%d", workCfg.Hostname, port))
+	}
 	ui.NewLine()
 }

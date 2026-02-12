@@ -38,8 +38,12 @@ func runStatus(cmd *cobra.Command, args []string) {
 	cfg, err := config.New()
 	checkError(err)
 
+	// Load worktree configuration
+	workCfg, err := config.LoadWorktreeConfig(cfg.ProjectRoot)
+	checkError(err)
+
 	// Load registry
-	reg, err := registry.Load(cfg.WorktreeDir)
+	reg, err := registry.Load(cfg.WorktreeDir, workCfg)
 	checkError(err)
 
 	// Get worktree from registry
@@ -75,7 +79,7 @@ func runStatus(cmd *cobra.Command, args []string) {
 	}
 
 	// Check if feature is running
-	running := docker.IsFeatureRunning(featureName)
+	running := docker.IsFeatureRunning(workCfg.ProjectName, featureName)
 
 	if running {
 		ui.PrintStatusLine("Status", "🟢 Running")
@@ -83,17 +87,17 @@ func runStatus(cmd *cobra.Command, args []string) {
 
 		// Show port mapping from registry
 		ui.PrintHeader("Port Mapping")
-		ui.PrintStatusLine("Frontend", fmt.Sprintf("http://localhost:%d", wt.Ports["FE_PORT"]))
-		ui.PrintStatusLine("Backend", fmt.Sprintf("http://localhost:%d", wt.Ports["BE_PORT"]))
-		ui.PrintStatusLine("PostgreSQL", fmt.Sprintf("localhost:%d", wt.Ports["POSTGRES_PORT"]))
-		ui.PrintStatusLine("Mailpit", fmt.Sprintf("http://localhost:%d", wt.Ports["MAILPIT_UI_PORT"]))
+		displayServices := workCfg.GetDisplayableServices(wt.Ports)
+		for name, url := range displayServices {
+			ui.PrintStatusLine(name, url)
+		}
 		ui.NewLine()
 
 		// Show container health
 		ui.PrintHeader("Container Health")
 		dockerCmd := exec.Command(
 			"docker", "ps",
-			"--filter", fmt.Sprintf("name=skillsetup-%s-", featureName),
+			"--filter", fmt.Sprintf("name=%s-%s-", workCfg.ProjectName, featureName),
 			"--format", "table {{.Names}}\t{{.Status}}",
 		)
 

@@ -11,11 +11,11 @@ const version = "1.0.0"
 
 var rootCmd = &cobra.Command{
 	Use:   "worktree",
-	Short: "Manage git worktrees for Skillsetup multi-instance development",
+	Short: "Manage git worktrees for multi-instance development",
 	Long: `Worktree Manager - A CLI tool for managing git worktrees in multi-instance development environments.
 
-This tool helps you create, manage, and remove coordinated git worktrees for both backend
-and frontend repositories, integrated with the Skillsetup multi-instance Docker setup.`,
+This tool helps you create, manage, and remove coordinated git worktrees for multiple
+projects, integrated with multi-instance Docker setups.`,
 	Version: version,
 }
 
@@ -38,6 +38,7 @@ func init() {
 	rootCmd.AddCommand(statusCmd)
 	rootCmd.AddCommand(portsCmd)
 	rootCmd.AddCommand(newFeatureCmd)
+	rootCmd.AddCommand(doctorCmd)
 
 	// Customize help template
 	rootCmd.SetHelpTemplate(`{{.Long}}

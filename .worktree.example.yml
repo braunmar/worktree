@@ -1,36 +1,46 @@
 # Example .worktree.yml Configuration
 # Copy this to your project root and customize for your needs
 
+# Project namespace/prefix for Docker containers and services
+# Used in container naming: {project_name}-{feature}-{service}
+# Only alphanumeric characters and hyphens allowed, cannot start/end with hyphen
+# Examples: "myproject", "acme-app", "dev-environment"
+project_name: "myproject"
+
+# Hostname for service URLs (default: localhost)
+# Change this for remote development, tunnels (ngrok, cloudflare), or custom domains
+# Examples: "localhost", "dev.mycompany.com", "192.168.1.100"
+hostname: localhost
+
 # Project definitions
 projects:
   # Example: Backend service
   backend:
     dir: backend                              # Directory relative to project root
     main_branch: main                         # Main branch name
-    start_command: "docker-compose up -d"     # Start services ({instance} placeholder)
-    migration_command: "npm run migrate"      # Run migrations (optional)
-    post_command: "npm run seed"              # Run after start (fixtures, seed data)
+    start_command: "docker-compose up -d"     # Start services (env vars set by worktree manager)
+    post_command: "npm run seed"              # Run after start (fixtures, seed data, migrations)
     claude_working_dir: true                  # Set as Claude's working directory
 
   # Example: Frontend app
   frontend:
     dir: frontend
     main_branch: main
-    start_command: "PORT={port} npm start"    # Use {port} for dynamic ports
-    # No migrations or post_command needed
+    start_command: "npm start"                # Env vars like PORT set from registry
+    # No post_command needed for this project
 
   # Example: Microservice
   api:
     dir: services/api
     main_branch: develop
-    start_command: "go run main.go --port 808{instance}"
-    migration_command: "make migrate INSTANCE={instance}"
+    start_command: "go run main.go"           # Env vars set from registry
+    post_command: "make migrate && make seed" # Run migrations and seed data after start
 
   # Example: Worker/Queue
   worker:
     dir: worker
     main_branch: main
-    start_command: "python worker.py --instance {instance}"
+    start_command: "python worker.py"         # Env vars set from registry
     post_command: "python seed_jobs.py"
 
 # Preset configurations
@@ -53,110 +63,127 @@ presets:
 # Default preset
 default_preset: fullstack
 
-# Maximum instances (0-N)
-max_instances: 5
+# NOTE: Feature-based worktrees use dynamic port allocation via registry
+# No instance limits - unlimited features supported
 
-# Auto-run migrations
-auto_migrations: true
-
-# Auto-run post-commands (fixtures, seed)
+# Auto-run post-commands (fixtures, seed, migrations)
 auto_fixtures: true
+
+# Files/directories to symlink from project root into each worktree
+# Useful for sharing configuration, node_modules, vendor directories, etc.
+symlinks:
+  - source: ".claude"          # Share Claude configuration
+    target: ".claude"
+  # - source: ".env.shared"    # Share environment variables
+  #   target: ".env.shared"
+  # - source: "node_modules"   # Share node_modules (careful with path conflicts)
+  #   target: "node_modules"
+
+# Files/directories to copy from project root into each worktree
+# Useful for template files that should be customized per worktree
+copies:
+  # - source: ".env.template"  # Copy template and customize per worktree
+  #   target: ".env"
+  # - source: "config.example.yml"
+  #   target: "config.yml"
 
 # Port/Service display configuration
 # Customize what services are shown after setup
+# IMPORTANT: All services must define port ranges - there are no hardcoded defaults
+# Each service needs: name (for display), url (template), port (base), and range (for allocation)
 ports:
   # Frontend example
   frontend:
     name: "Frontend"
-    url: "http://localhost:{port}"
+    url: "http://{host}:{port}"
     port: "3000 + {instance}"    # Expression: base + instance
 
   # Backend API
   backend:
     name: "Backend API"
-    url: "http://localhost:{port}"
+    url: "http://{host}:{port}"
     port: "8080 + {instance}"
 
   # API documentation (Swagger, ReDoc, etc.)
   docs:
     name: "API Docs"
-    url: "http://localhost:{port}/docs"
+    url: "http://{host}:{port}/docs"
     port: "8080 + {instance}"
 
   # Database examples
   postgres:
     name: "PostgreSQL"
-    url: "localhost:{port}"
+    url: "{host}:{port}"
     port: "5432 + {instance}"
 
   mysql:
     name: "MySQL"
-    url: "localhost:{port}"
+    url: "{host}:{port}"
     port: "3306 + {instance}"
 
   mongo:
     name: "MongoDB"
-    url: "mongodb://localhost:{port}"
+    url: "mongodb://{host}:{port}"
     port: "27017 + {instance}"
 
   redis:
     name: "Redis"
-    url: "redis://localhost:{port}"
+    url: "redis://{host}:{port}"
     port: "6379 + {instance}"
 
   # Message queues
   rabbitmq:
     name: "RabbitMQ"
-    url: "http://localhost:{port}"
+    url: "http://{host}:{port}"
     port: "15672 + {instance}"    # Management UI
 
   kafka:
     name: "Kafka"
-    url: "localhost:{port}"
+    url: "{host}:{port}"
     port: "9092 + {instance}"
 
   # Monitoring & Debugging
   grafana:
     name: "Grafana"
-    url: "http://localhost:{port}"
+    url: "http://{host}:{port}"
     port: "3001 + {instance}"
 
   prometheus:
     name: "Prometheus"
-    url: "http://localhost:{port}"
+    url: "http://{host}:{port}"
     port: "9090 + {instance}"
 
   jaeger:
     name: "Jaeger"
-    url: "http://localhost:{port}"
+    url: "http://{host}:{port}"
     port: "16686 + {instance}"
 
   # Development tools
   mailcatcher:
     name: "Mail"
-    url: "http://localhost:{port}"
+    url: "http://{host}:{port}"
     port: "1080 + {instance}"
 
   adminer:
     name: "Adminer"
-    url: "http://localhost:{port}"
+    url: "http://{host}:{port}"
     port: "8080 + {instance}"
 
   # AWS LocalStack
   localstack:
     name: "LocalStack"
-    url: "http://localhost:{port}"
+    url: "http://{host}:{port}"
     port: "4566 + {instance}"
 
   # gRPC services
   grpc:
     name: "gRPC"
-    url: "localhost:{port}"
+    url: "{host}:{port}"
     port: "50051 + {instance}"
 
 # Notes:
-# - {instance} is replaced with the instance number (0, 1, 2, etc.)
-# - {port} is calculated from the port expression
-# - Port expressions support: "base + {instance}" format
-# - Only configured ports are displayed (remove unused services)
-# - Services are shown in the order defined here
+# - Port configuration is now managed by the registry system
+# - The registry finds available ports dynamically for each feature
+# - Environment variables (FE_PORT, BE_PORT, etc.) are set automatically
+# - Your commands should use these environment variables directly
+# - No need for instance-based calculations anymore

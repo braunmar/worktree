@@ -1,6 +1,6 @@
 # Worktree Manager
 
-A Go CLI tool for managing git worktrees in Skillsetup's multi-instance development environment.
+A Go CLI tool for managing git worktrees in multi-instance development environments.
 
 ## Features
 
@@ -132,7 +132,7 @@ go test ./pkg/config -v
 
 ### "Could not find project root"
 
-Make sure you're running from within the Skillsetup project directory. The tool looks for `backend/` and `frontend/` directories.
+Make sure you're running from within your project directory and that a `.worktree.yml` configuration file exists in the project root.
 
 ### "Failed to run fixtures"
 
@@ -146,10 +146,7 @@ make dev-fixture INSTANCE=1
 
 Verify the Docker network exists and backend is running:
 ```bash
-docker network ls | grep skillsetup
-docker ps | grep skillsetup-inst1
+# Replace <project-name> with your project_name from .worktree.yml
+docker network ls | grep <project-name>
+docker ps | grep <project-name>
 ```
-
-## License
-
-Internal tool for Skillsetup development.

@@ -50,8 +50,12 @@ func runList(cmd *cobra.Command, args []string) {
 		return
 	}
 
+	// Load worktree configuration
+	workCfg, err := config.LoadWorktreeConfig(cfg.ProjectRoot)
+	checkError(err)
+
 	// Load registry
-	reg, err := registry.Load(cfg.WorktreeDir)
+	reg, err := registry.Load(cfg.WorktreeDir, workCfg)
 	if err != nil {
 		checkError(fmt.Errorf("failed to load registry: %w", err))
 	}
@@ -95,7 +99,7 @@ func runList(cmd *cobra.Command, args []string) {
 		frontendCount, _ := git.GetUncommittedChangesCount(frontendWorktree)
 
 		// Check if feature is running
-		running := docker.IsFeatureRunning(featureName)
+		running := docker.IsFeatureRunning(workCfg.ProjectName, featureName)
 
 		// Display feature information
 		fmt.Printf("Feature: %s\n", featureName)

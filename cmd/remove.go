@@ -20,9 +20,13 @@ var (
 )
 
 var removeCmd = &cobra.Command{
-	Use:   "remove <feature-name>",
+	Use:   "remove <feature-name-or-branch>",
 	Short: "Remove a feature worktree",
 	Long: `Remove git worktrees for a feature and update the registry.
+
+The feature name/branch is automatically normalized, so you can use either:
+- The normalized feature name: feature-user-auth
+- The original branch name: feature/user-auth
 
 This command performs safety checks:
 - Warns if feature is still running
@@ -30,9 +34,10 @@ This command performs safety checks:
 - Prompts for confirmation (unless --force is used)
 - Removes from registry
 
-Example:
-  worktree remove feature-user-auth
-  worktree remove feature-reports --force`,
+Examples:
+  worktree remove feature-user-auth           # Using normalized name
+  worktree remove feature/user-auth           # Using branch name
+  worktree remove feature/reports --force`,
 	Args: cobra.ExactArgs(1),
 	Run:  runRemove,
 }
@@ -42,14 +47,22 @@ func init() {
 }
 
 func runRemove(cmd *cobra.Command, args []string) {
-	featureName := args[0]
+	input := args[0]
+
+	// Normalize the input to match behavior of new-feature command
+	// This allows users to use either the normalized name or the original branch name
+	featureName := registry.NormalizeBranchName(input)
 
 	// Get configuration
 	cfg, err := config.New()
 	checkError(err)
 
+	// Load worktree configuration
+	workCfg, err := config.LoadWorktreeConfig(cfg.ProjectRoot)
+	checkError(err)
+
 	// Load registry
-	reg, err := registry.Load(cfg.WorktreeDir)
+	reg, err := registry.Load(cfg.WorktreeDir, workCfg)
 	checkError(err)
 
 	// Get worktree from registry
@@ -94,26 +107,19 @@ func runRemove(cmd *cobra.Command, args []string) {
 	ui.PrintStatusLine("Branch", wt.Branch)
 	ui.PrintStatusLine("Backend", fmt.Sprintf("worktrees/%s/backend (branch: %s)", featureName, backendBranch))
 	ui.PrintStatusLine("Frontend", fmt.Sprintf("worktrees/%s/frontend (branch: %s)", featureName, frontendBranch))
+	ui.PrintStatusLine("Compose Project", wt.ComposeProject)
 	ui.NewLine()
 
-	// Check if feature is running
-	if docker.IsFeatureRunning(featureName) && !forceRemove {
-		ui.Warning(fmt.Sprintf("Feature '%s' is currently running. Stop it first? [y/N]: ", featureName))
-		reader := bufio.NewReader(os.Stdin)
-		response, _ := reader.ReadString('\n')
-		response = strings.TrimSpace(strings.ToLower(response))
-
-		if response == "y" || response == "yes" {
-			ui.Loading(fmt.Sprintf("Stopping feature %s...", featureName))
-			featurePath := cfg.WorktreeFeaturePath(featureName)
-			if err := docker.StopFeature(featureName, featurePath); err != nil {
-				ui.Error(fmt.Sprintf("Failed to stop feature: %v", err))
-				os.Exit(1)
-			}
-			ui.Success("Feature stopped")
-			ui.NewLine()
-		}
+	// Always stop services before removing (prevents stale containers)
+	ui.Info("Stopping services (if running)...")
+	featurePath := cfg.WorktreeFeaturePath(featureName)
+	if err := docker.StopFeature(workCfg.ProjectName, featureName, featurePath); err != nil {
+		ui.Warning(fmt.Sprintf("Failed to stop services: %v", err))
+		ui.Info("Continuing with removal...")
+	} else {
+		ui.CheckMark("Services stopped")
 	}
+	ui.NewLine()
 
 	// Check for uncommitted changes
 	backendChanges, _ := git.HasUncommittedChanges(backendWorktree)

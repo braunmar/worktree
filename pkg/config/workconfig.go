@@ -9,40 +9,73 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// FileLink represents a file or directory to symlink or copy
+type FileLink struct {
+	Source string `yaml:"source"` // Path relative to project root
+	Target string `yaml:"target"` // Path relative to worktree root
+}
+
 // WorktreeConfig represents the .worktree.yml configuration
 type WorktreeConfig struct {
-	Projects       map[string]ProjectConfig    `yaml:"projects"`
-	Presets        map[string]PresetConfig     `yaml:"presets"`
-	DefaultPreset  string                      `yaml:"default_preset"`
-	MaxInstances   int                         `yaml:"max_instances"`
-	AutoFixtures   bool                        `yaml:"auto_fixtures"`
-	AutoMigrations bool                        `yaml:"auto_migrations"`
-	Ports          map[string]PortConfig       `yaml:"ports"`
+	ProjectName   string                      `yaml:"project_name"`
+	Hostname      string                      `yaml:"hostname"`
+	Projects      map[string]ProjectConfig    `yaml:"projects"`
+	Presets       map[string]PresetConfig     `yaml:"presets"`
+	DefaultPreset string                      `yaml:"default_preset"`
+	MaxInstances  int                         `yaml:"max_instances"`
+	AutoFixtures  bool                        `yaml:"auto_fixtures"`
+	Symlinks      []FileLink                  `yaml:"symlinks"`
+	Copies        []FileLink                  `yaml:"copies"`
+	Ports         map[string]PortConfig       `yaml:"ports"`
 }
 
 // PortConfig represents a port/service display configuration
 type PortConfig struct {
-	Name  string `yaml:"name"`
-	URL   string `yaml:"url"`
-	Port  string `yaml:"port"`  // Expression like "3000 + {instance}" or null for non-port configs
-	Value string `yaml:"value"` // String template for non-port configs like COMPOSE_PROJECT_NAME
-	Env   string `yaml:"env"`   // Environment variable name to export
+	Name  string   `yaml:"name"`
+	URL   string   `yaml:"url"`
+	Port  string   `yaml:"port"`  // Expression like "3000 + {instance}" or null for non-port configs
+	Value string   `yaml:"value"` // String template for non-port configs like COMPOSE_PROJECT_NAME
+	Env   string   `yaml:"env"`   // Environment variable name to export
+	Range *[2]int  `yaml:"range"` // Optional explicit range [min, max] for port allocation
 }
 
 // ProjectConfig represents a single project configuration
 type ProjectConfig struct {
-	Dir                string `yaml:"dir"`
-	MainBranch         string `yaml:"main_branch"`
-	StartCommand       string `yaml:"start_command"`
-	MigrationCommand   string `yaml:"migration_command"`
-	PostCommand        string `yaml:"post_command"` // Runs after start (fixtures, seed, etc.)
-	ClaudeWorkingDir   bool   `yaml:"claude_working_dir"`
+	Dir              string `yaml:"dir"`
+	MainBranch       string `yaml:"main_branch"`
+	StartCommand     string `yaml:"start_command"`
+	PostCommand      string `yaml:"post_command"` // Runs after start (fixtures, seed, etc.)
+	ClaudeWorkingDir bool   `yaml:"claude_working_dir"`
 }
 
 // PresetConfig represents a preset configuration
 type PresetConfig struct {
 	Projects    []string `yaml:"projects"`
 	Description string   `yaml:"description"`
+}
+
+// validateProjectName validates that project name only contains alphanumeric characters and hyphens
+func validateProjectName(name string) error {
+	if name == "" {
+		return fmt.Errorf("project_name cannot be empty")
+	}
+
+	// Check each character
+	for _, char := range name {
+		if !((char >= 'a' && char <= 'z') ||
+			(char >= 'A' && char <= 'Z') ||
+			(char >= '0' && char <= '9') ||
+			char == '-') {
+			return fmt.Errorf("project_name '%s' contains invalid character '%c'. Only alphanumeric characters and hyphens are allowed", name, char)
+		}
+	}
+
+	// Check it doesn't start or end with hyphen
+	if strings.HasPrefix(name, "-") || strings.HasSuffix(name, "-") {
+		return fmt.Errorf("project_name '%s' cannot start or end with a hyphen", name)
+	}
+
+	return nil
 }
 
 // LoadWorktreeConfig loads the .worktree.yml configuration file
@@ -69,6 +102,21 @@ func LoadWorktreeConfig(projectRoot string) (*WorktreeConfig, error) {
 	// Validate config
 	if err := config.Validate(); err != nil {
 		return nil, fmt.Errorf("invalid configuration: %w", err)
+	}
+
+	// Set default hostname if not provided
+	if config.Hostname == "" {
+		config.Hostname = "localhost"
+	}
+
+	// Validate project name is provided
+	if config.ProjectName == "" {
+		return nil, fmt.Errorf("project_name is required in .worktree.yml configuration file")
+	}
+
+	// Validate project name format
+	if err := validateProjectName(config.ProjectName); err != nil {
+		return nil, err
 	}
 
 	return &config, nil
@@ -158,9 +206,10 @@ func CalculatePort(expression string, instance int) int {
 }
 
 // GetPortURL generates the URL for a port configuration
-func (pc *PortConfig) GetURL(instance int) string {
-	port := CalculatePort(pc.Port, instance)
-	return strings.ReplaceAll(pc.URL, "{port}", fmt.Sprintf("%d", port))
+func (pc *PortConfig) GetURL(hostname string, port int) string {
+	url := strings.ReplaceAll(pc.URL, "{host}", hostname)
+	url = strings.ReplaceAll(url, "{port}", fmt.Sprintf("%d", port))
+	return url
 }
 
 // GetValue calculates the value for this port config (either port or string template)
@@ -170,7 +219,7 @@ func (pc *PortConfig) GetValue(instance int) string {
 		port := CalculatePort(pc.Port, instance)
 		return fmt.Sprintf("%d", port)
 	} else if pc.Value != "" {
-		// String template (e.g., "skillsetup-inst{instance}")
+		// String template (e.g., "myproject-inst{instance}")
 		return strings.ReplaceAll(pc.Value, "{instance}", fmt.Sprintf("%d", instance))
 	}
 	return ""
@@ -207,4 +256,107 @@ func (c *WorktreeConfig) GetClaudeWorkingProject() string {
 		return name
 	}
 	return ""
+}
+
+// GetPortRange extracts port range from either explicit Range field or Port expression
+func (pc *PortConfig) GetPortRange() *[2]int {
+	// 1. If explicit range defined, use it
+	if pc.Range != nil {
+		return pc.Range
+	}
+
+	// 2. If port expression exists, extract base and calculate range
+	if pc.Port != "" {
+		base := extractBasePort(pc.Port)
+		if base > 0 {
+			return &[2]int{base, base + 100} // Default: 100 port range
+		}
+	}
+
+	// 3. No range available
+	return nil
+}
+
+// extractBasePort extracts base port from expressions like "3000 + {instance}"
+func extractBasePort(expr string) int {
+	// Handle "base + {instance}" format
+	if strings.Contains(expr, "+") {
+		parts := strings.Split(expr, "+")
+		if len(parts) >= 1 {
+			var base int
+			fmt.Sscanf(strings.TrimSpace(parts[0]), "%d", &base)
+			return base
+		}
+	}
+
+	// Handle plain number
+	var port int
+	fmt.Sscanf(strings.TrimSpace(expr), "%d", &port)
+	return port
+}
+
+// GetServiceURL returns the formatted URL for a service by port env name
+// Returns empty string if port not found or URL not configured
+func (c *WorktreeConfig) GetServiceURL(portEnvName string, ports map[string]int) string {
+	portCfg, exists := c.Ports[portEnvName]
+	if !exists || portCfg.URL == "" {
+		return ""
+	}
+
+	port, exists := ports[portEnvName]
+	if !exists {
+		return ""
+	}
+
+	return portCfg.GetURL(c.Hostname, port)
+}
+
+// GetDisplayableServices returns a list of services that should be displayed
+// Returns map of service name -> URL
+func (c *WorktreeConfig) GetDisplayableServices(ports map[string]int) map[string]string {
+	services := make(map[string]string)
+
+	for envName, portCfg := range c.Ports {
+		// Skip if name or URL not configured (these are not meant to be displayed)
+		if portCfg.Name == "" || portCfg.URL == "" {
+			continue
+		}
+
+		port, exists := ports[envName]
+		if !exists {
+			continue
+		}
+
+		url := portCfg.GetURL(c.Hostname, port)
+		services[portCfg.Name] = url
+	}
+
+	return services
+}
+
+// CalculateRelativePath calculates relative path from worktree to project root
+// Example: worktrees/feature-name -> ../..
+func CalculateRelativePath(worktreeDepth int) string {
+	if worktreeDepth <= 0 {
+		return "."
+	}
+	result := ".."
+	for i := 1; i < worktreeDepth; i++ {
+		result += "/.."
+	}
+	return result
+}
+
+// GetPortServiceNames returns list of all service names that need port allocation
+// Services must have both 'env' and 'range' fields to be included
+// This excludes template-only services like COMPOSE_PROJECT_NAME
+func (c *WorktreeConfig) GetPortServiceNames() []string {
+	var services []string
+	for name, portCfg := range c.Ports {
+		// Only include services that need port allocation (have both env and range)
+		if portCfg.Env != "" && portCfg.Range != nil {
+			services = append(services, name)
+		}
+	}
+	return services
 }

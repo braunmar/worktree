@@ -5,7 +5,30 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"worktree/pkg/config"
 )
+
+// testConfig creates a WorktreeConfig with standard port ranges for testing
+func testConfig() *config.WorktreeConfig {
+	feRange := [2]int{3000, 3100}
+	beRange := [2]int{8080, 8180}
+	pgRange := [2]int{5432, 5532}
+
+	return &config.WorktreeConfig{
+		Ports: map[string]config.PortConfig{
+			"FE_PORT": {
+				Range: &feRange,
+			},
+			"BE_PORT": {
+				Range: &beRange,
+			},
+			"POSTGRES_PORT": {
+				Range: &pgRange,
+			},
+		},
+	}
+}
 
 func TestNormalizeBranchName(t *testing.T) {
 	tests := []struct {
@@ -43,7 +66,7 @@ func TestRegistryLoadAndSave(t *testing.T) {
 	defer os.RemoveAll(tempDir)
 
 	// Load registry (should create empty one)
-	reg, err := Load(tempDir)
+	reg, err := Load(tempDir, nil)
 	if err != nil {
 		t.Fatalf("Failed to load registry: %v", err)
 	}
@@ -60,7 +83,7 @@ func TestRegistryLoadAndSave(t *testing.T) {
 		Created:        time.Now(),
 		Projects:       []string{"backend", "frontend"},
 		Ports:          map[string]int{"FE_PORT": 3001, "BE_PORT": 8081},
-		ComposeProject: "skillsetup-feature-test",
+		ComposeProject: "myproject-feature-test",
 	}
 
 	if err := reg.Add(wt); err != nil {
@@ -79,7 +102,7 @@ func TestRegistryLoadAndSave(t *testing.T) {
 	}
 
 	// Load registry again
-	reg2, err := Load(tempDir)
+	reg2, err := Load(tempDir, nil)
 	if err != nil {
 		t.Fatalf("Failed to load registry second time: %v", err)
 	}
@@ -106,7 +129,7 @@ func TestRegistryAddRemove(t *testing.T) {
 	}
 	defer os.RemoveAll(tempDir)
 
-	reg, err := Load(tempDir)
+	reg, err := Load(tempDir, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -155,7 +178,7 @@ func TestPortAllocation(t *testing.T) {
 	}
 	defer os.RemoveAll(tempDir)
 
-	reg, err := Load(tempDir)
+	reg, err := Load(tempDir, testConfig())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -212,7 +235,7 @@ func TestFindAvailablePort(t *testing.T) {
 	}
 	defer os.RemoveAll(tempDir)
 
-	reg, err := Load(tempDir)
+	reg, err := Load(tempDir, testConfig())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -232,5 +255,85 @@ func TestFindAvailablePort(t *testing.T) {
 	_, err = reg.FindAvailablePort("INVALID_SERVICE")
 	if err == nil {
 		t.Error("Expected error for invalid service")
+	}
+}
+
+func TestBuildPortRanges(t *testing.T) {
+	// Test with nil config (should return empty)
+	ranges := BuildPortRanges(nil)
+	if len(ranges) != 0 {
+		t.Errorf("Expected empty ranges with nil config, got %v", ranges)
+	}
+
+	// Test with configured explicit ranges
+	explicitRange := [2]int{4000, 4100}
+	workCfg := &config.WorktreeConfig{
+		Ports: map[string]config.PortConfig{
+			"FE_PORT": {
+				Range: &explicitRange,
+			},
+		},
+	}
+
+	ranges = BuildPortRanges(workCfg)
+	if ranges["FE_PORT"] != [2]int{4000, 4100} {
+		t.Errorf("Expected FE_PORT range [4000, 4100], got %v", ranges["FE_PORT"])
+	}
+	// BE_PORT should not be in ranges since it wasn't configured
+	if _, exists := ranges["BE_PORT"]; exists {
+		t.Errorf("BE_PORT should not exist when not configured, got %v", ranges["BE_PORT"])
+	}
+
+	// Test with port expression (no explicit range)
+	workCfg2 := &config.WorktreeConfig{
+		Ports: map[string]config.PortConfig{
+			"BE_PORT": {
+				Port: "9000 + {instance}",
+			},
+		},
+	}
+
+	ranges2 := BuildPortRanges(workCfg2)
+	// Should extract from expression: 9000 base + 100 range
+	if ranges2["BE_PORT"] != [2]int{9000, 9100} {
+		t.Errorf("Expected BE_PORT range [9000, 9100], got %v", ranges2["BE_PORT"])
+	}
+}
+
+func TestConfiguredPortAllocation(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "registry-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	// Create config with custom range
+	customRange := [2]int{5000, 5100}
+	workCfg := &config.WorktreeConfig{
+		Ports: map[string]config.PortConfig{
+			"FE_PORT": {
+				Range: &customRange,
+			},
+		},
+	}
+
+	// Load registry with config
+	reg, err := Load(tempDir, workCfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Allocate FE_PORT
+	port, err := reg.FindAvailablePort("FE_PORT")
+	if err != nil {
+		t.Fatalf("Failed to find available port: %v", err)
+	}
+
+	// Should be in configured range, not default range
+	if port < 5000 || port > 5100 {
+		t.Errorf("Port %d is outside configured range 5000-5100", port)
+	}
+	if port >= 3000 && port <= 3100 {
+		t.Errorf("Port %d is in default range, should use configured range", port)
 	}
 }

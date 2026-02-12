@@ -64,7 +64,7 @@ func CrossMark(message string) {
 }
 
 // ShowPortsFromConfig displays port mapping from configuration
-func ShowPortsFromConfig(instance int, portConfigs map[string]config.PortConfig) {
+func ShowPortsFromConfig(hostname string, instance int, ports map[string]int, portConfigs map[string]config.PortConfig) {
 	if len(portConfigs) == 0 {
 		// Fallback to showing instance number only
 		fmt.Printf("\n%s Instance %d configured\n\n", "📍", instance)
@@ -75,12 +75,21 @@ func ShowPortsFromConfig(instance int, portConfigs map[string]config.PortConfig)
 
 	// Display ports in order (if config preserves order, or alphabetically)
 	// Skip entries without a name (used only for env var export)
-	for _, portCfg := range portConfigs {
+	for envName, portCfg := range portConfigs {
 		// Skip if name is empty or URL is null/empty
 		if portCfg.Name == "" || portCfg.Name == "null" {
 			continue
 		}
-		url := portCfg.GetURL(instance)
+		if portCfg.URL == "" || portCfg.URL == "null" {
+			continue
+		}
+
+		port, exists := ports[envName]
+		if !exists {
+			continue
+		}
+
+		url := portCfg.GetURL(hostname, port)
 		if url == "" || url == "null" {
 			continue
 		}

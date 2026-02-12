@@ -4,9 +4,11 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strings"
 	"time"
 
 	"worktree/pkg/config"
+	"worktree/pkg/docker"
 	"worktree/pkg/git"
 	"worktree/pkg/registry"
 	"worktree/pkg/ui"
@@ -15,15 +17,14 @@ import (
 )
 
 var (
-	preset         string
-	noFixturesNF   bool
-	noMigrationsNF bool
+	preset       string
+	noFixturesNF bool
 )
 
 var newFeatureCmd = &cobra.Command{
 	Use:   "new-feature <branch> [preset]",
 	Short: "Create and start a complete feature development environment",
-	Long: `Create worktrees, start services, run migrations, and navigate Claude to the working directory.
+	Long: `Create worktrees, start services, and navigate Claude to the working directory.
 
 This is a one-command setup for feature development that:
 1. Reads configuration from .worktree.yml
@@ -31,9 +32,8 @@ This is a one-command setup for feature development that:
 3. Dynamically allocates ports from available ranges
 4. Creates git worktrees for all projects in the preset
 5. Starts services (backend, frontend, etc.)
-6. Runs migrations (if configured)
-7. Runs fixtures (if configured)
-8. Navigates Claude to the backend worktree
+6. Runs post-startup commands (if configured)
+7. Navigates Claude to the backend worktree
 
 Examples:
   worktree new-feature feature/user-auth              # Use default preset
@@ -46,7 +46,6 @@ Examples:
 
 func init() {
 	newFeatureCmd.Flags().BoolVar(&noFixturesNF, "no-fixtures", false, "skip running fixtures")
-	newFeatureCmd.Flags().BoolVar(&noMigrationsNF, "no-migrations", false, "skip running migrations")
 }
 
 func runNewFeature(cmd *cobra.Command, args []string) {
@@ -86,21 +85,17 @@ func runNewFeature(cmd *cobra.Command, args []string) {
 	}
 
 	// Load registry
-	reg, err := registry.Load(cfg.WorktreeDir)
+	reg, err := registry.Load(cfg.WorktreeDir, workCfg)
 	checkError(err)
 
 	// Allocate ports for all services
 	ui.Section("Allocating ports...")
-	services := []string{"FE_PORT", "BE_PORT", "POSTGRES_PORT", "MAILPIT_SMTP_PORT", "MAILPIT_UI_PORT", "LOCALSTACK_PORT"}
+	services := workCfg.GetPortServiceNames()
 	ports, err := reg.AllocatePorts(services)
 	checkError(err)
 
 	// Display allocated ports
-	ui.CheckMark("Ports allocated:")
-	ui.PrintStatusLine("  Frontend", fmt.Sprintf("http://localhost:%d", ports["FE_PORT"]))
-	ui.PrintStatusLine("  Backend", fmt.Sprintf("http://localhost:%d", ports["BE_PORT"]))
-	ui.PrintStatusLine("  PostgreSQL", fmt.Sprintf("localhost:%d", ports["POSTGRES_PORT"]))
-	ui.PrintStatusLine("  Mailpit UI", fmt.Sprintf("http://localhost:%d", ports["MAILPIT_UI_PORT"]))
+	ui.CheckMark("Ports allocated")
 	ui.NewLine()
 
 	// Create feature directory
@@ -125,39 +120,87 @@ func runNewFeature(cmd *cobra.Command, args []string) {
 	}
 	ui.NewLine()
 
-	// Create single .claude symlink at worktree root
-	ui.Section("Setting up Claude configuration...")
-	claudeSymlink := featureDir + "/.claude"
+	// Create symlinks from configuration
+	if len(workCfg.Symlinks) > 0 {
+		ui.Section("Creating symlinks...")
+		// Calculate relative path from worktree to project root
+		// worktrees/feature-name -> ../..
+		relPathToRoot := config.CalculateRelativePath(2) // 2 levels: worktrees/feature-name
 
-	// Calculate relative path from worktree to root .claude
-	// worktrees/feature-name/.claude -> ../../.claude
-	relPath := "../../.claude"
+		for _, link := range workCfg.Symlinks {
+			sourcePath := relPathToRoot + "/" + link.Source
+			targetPath := featureDir + "/" + link.Target
 
-	// Check if .claude already exists
-	if info, err := os.Lstat(claudeSymlink); err == nil {
-		// If it's a symlink, remove it
-		if info.Mode()&os.ModeSymlink != 0 {
-			if err := os.Remove(claudeSymlink); err != nil {
-				ui.Warning(fmt.Sprintf("Failed to remove existing symlink: %v", err))
+			// Check if target already exists
+			if info, err := os.Lstat(targetPath); err == nil {
+				// If it's a symlink, remove it
+				if info.Mode()&os.ModeSymlink != 0 {
+					if err := os.Remove(targetPath); err != nil {
+						ui.Warning(fmt.Sprintf("Failed to remove existing symlink %s: %v", link.Target, err))
+						continue
+					}
+				} else {
+					// If it's a directory or file, back it up and remove
+					backupPath := targetPath + ".backup." + time.Now().Format("20060102-150405")
+					if err := os.Rename(targetPath, backupPath); err != nil {
+						ui.Warning(fmt.Sprintf("Failed to backup existing %s: %v", link.Target, err))
+						continue
+					} else {
+						ui.Info(fmt.Sprintf("Backed up existing %s", link.Target))
+					}
+				}
 			}
-		} else {
-			// If it's a directory or file, back it up and remove
-			backupPath := claudeSymlink + ".backup." + time.Now().Format("20060102-150405")
-			if err := os.Rename(claudeSymlink, backupPath); err != nil {
-				ui.Warning(fmt.Sprintf("Failed to backup existing .claude: %v", err))
+
+			// Create symlink
+			if err := os.Symlink(sourcePath, targetPath); err != nil {
+				ui.Warning(fmt.Sprintf("Failed to create symlink %s: %v", link.Target, err))
 			} else {
-				ui.Info(fmt.Sprintf("Backed up existing .claude to %s", backupPath))
+				ui.CheckMark(fmt.Sprintf("Linked %s -> %s", link.Target, link.Source))
 			}
 		}
+		ui.NewLine()
 	}
 
-	// Create symlink
-	if err := os.Symlink(relPath, claudeSymlink); err != nil {
-		ui.Warning(fmt.Sprintf("Failed to create .claude symlink: %v", err))
-	} else {
-		ui.CheckMark("Linked .claude to root")
+	// Copy files from configuration
+	if len(workCfg.Copies) > 0 {
+		ui.Section("Copying files...")
+		for _, copy := range workCfg.Copies {
+			sourcePath := cfg.ProjectRoot + "/" + copy.Source
+			targetPath := featureDir + "/" + copy.Target
+
+			// Check if source exists
+			sourceInfo, err := os.Stat(sourcePath)
+			if os.IsNotExist(err) {
+				ui.Warning(fmt.Sprintf("Source not found: %s", copy.Source))
+				continue
+			}
+
+			// Handle directories vs files
+			if sourceInfo.IsDir() {
+				// Copy directory recursively using cp command
+				cpCmd := exec.Command("cp", "-R", sourcePath, targetPath)
+				if err := cpCmd.Run(); err != nil {
+					ui.Warning(fmt.Sprintf("Failed to copy directory %s: %v", copy.Source, err))
+				} else {
+					ui.CheckMark(fmt.Sprintf("Copied directory %s -> %s", copy.Source, copy.Target))
+				}
+			} else {
+				// Copy file
+				sourceData, err := os.ReadFile(sourcePath)
+				if err != nil {
+					ui.Warning(fmt.Sprintf("Failed to read %s: %v", copy.Source, err))
+					continue
+				}
+
+				if err := os.WriteFile(targetPath, sourceData, 0644); err != nil {
+					ui.Warning(fmt.Sprintf("Failed to copy %s: %v", copy.Target, err))
+				} else {
+					ui.CheckMark(fmt.Sprintf("Copied %s -> %s", copy.Source, copy.Target))
+				}
+			}
+		}
+		ui.NewLine()
 	}
-	ui.NewLine()
 
 	// Add to registry
 	wt := &registry.Worktree{
@@ -166,7 +209,7 @@ func runNewFeature(cmd *cobra.Command, args []string) {
 		Created:        time.Now(),
 		Projects:       presetCfg.Projects,
 		Ports:          ports,
-		ComposeProject: fmt.Sprintf("skillsetup-%s", featureName),
+		ComposeProject: fmt.Sprintf("%s-%s", workCfg.ProjectName, featureName),
 	}
 	if err := reg.Add(wt); err != nil {
 		checkError(err)
@@ -220,40 +263,31 @@ func runNewFeature(cmd *cobra.Command, args []string) {
 		if err := makeCmd.Run(); err != nil {
 			ui.Warning(fmt.Sprintf("Failed to start %s: %v", projectName, err))
 		} else {
-			ui.CheckMark(fmt.Sprintf("Started %s", projectName))
+			// Verify containers are actually running (wait for startup)
+			time.Sleep(3 * time.Second)
+
+			containerStatus, err := docker.GetFeatureContainerStatus(workCfg.ProjectName, featureName)
+			if err != nil {
+				ui.Warning(fmt.Sprintf("Could not verify %s container status: %v", projectName, err))
+			} else {
+				// Check if any containers exited
+				hasFailures := false
+				for service, status := range containerStatus {
+					if strings.Contains(strings.ToLower(status), "exited") {
+						ui.Warning(fmt.Sprintf("%s service '%s' exited: %s", projectName, service, status))
+						hasFailures = true
+					}
+				}
+
+				if !hasFailures && len(containerStatus) > 0 {
+					ui.CheckMark(fmt.Sprintf("Started %s", projectName))
+				} else if len(containerStatus) == 0 {
+					ui.Warning(fmt.Sprintf("No containers found for %s", projectName))
+				}
+			}
 		}
 	}
 	ui.NewLine()
-
-	// Run migrations for backend (if configured)
-	if workCfg.AutoMigrations && !noMigrationsNF {
-		ui.Section("Running migrations...")
-		for _, projectName := range presetCfg.Projects {
-			project := workCfg.Projects[projectName]
-
-			if project.MigrationCommand == "" {
-				continue
-			}
-
-			ui.Loading(fmt.Sprintf("Running %s migrations...", projectName))
-
-			worktreePath := featureDir + "/" + project.Dir
-			migrationCmd := project.MigrationCommand
-
-			cmd := exec.Command("sh", "-c", migrationCmd)
-			cmd.Dir = worktreePath
-			cmd.Env = envList
-			cmd.Stdout = os.Stdout
-			cmd.Stderr = os.Stderr
-
-			if err := cmd.Run(); err != nil {
-				ui.Warning(fmt.Sprintf("Failed to run migrations: %v", err))
-			} else {
-				ui.CheckMark(fmt.Sprintf("Migrations completed for %s", projectName))
-			}
-		}
-		ui.NewLine()
-	}
 
 	// Run post-commands (fixtures, seed data, etc.)
 	if workCfg.AutoFixtures && !noFixturesNF {
@@ -285,26 +319,28 @@ func runNewFeature(cmd *cobra.Command, args []string) {
 		ui.NewLine()
 	}
 
-	// Get Claude working directory
-	claudeProject := workCfg.GetClaudeWorkingProject()
+	// Get Claude working directory (from preset projects, not all projects)
+	claudeProject := getClaudeWorkingProject(workCfg, presetCfg.Projects)
 	claudePath := fmt.Sprintf("worktrees/%s/%s", featureName, workCfg.Projects[claudeProject].Dir)
 
 	// Success message
 	ui.Success("Feature environment ready!")
 	ui.NewLine()
 
-	// Show access URLs
-	ui.PrintHeader("Access services:")
-	ui.PrintStatusLine("Frontend", fmt.Sprintf("http://localhost:%d", ports["FE_PORT"]))
-	ui.PrintStatusLine("Backend", fmt.Sprintf("http://localhost:%d", ports["BE_PORT"]))
-	ui.PrintStatusLine("Mailpit", fmt.Sprintf("http://localhost:%d", ports["MAILPIT_UI_PORT"]))
-	ui.NewLine()
-
 	// Navigate Claude
 	ui.PrintHeader("Claude is ready to work:")
-	ui.PrintStatusLine("Working directory", claudePath)
-	ui.PrintStatusLine("Feature name", featureName)
+	ui.PrintStatusLine("  Working directory", claudePath)
+	ui.PrintStatusLine("  Feature name", featureName)
 	ui.NewLine()
+
+	// Show access URLs dynamically from config
+	displayServices := workCfg.GetDisplayableServices(ports)
+	if len(displayServices) > 0 {
+		for name, url := range displayServices {
+			ui.PrintStatusLine("  "+name, url)
+		}
+		ui.NewLine()
+	}
 
 	// Change to working directory
 	if err := os.Chdir(claudePath); err != nil {

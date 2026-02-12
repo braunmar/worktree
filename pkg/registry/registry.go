@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"worktree/pkg/config"
 )
 
 const (
@@ -34,25 +35,36 @@ type Registry struct {
 	filePath   string
 }
 
-// DefaultPortRanges returns the default port ranges for services
-func DefaultPortRanges() map[string][2]int {
-	return map[string][2]int{
-		"FE_PORT":            {3000, 3100},
-		"BE_PORT":            {8080, 8180},
-		"POSTGRES_PORT":      {5432, 5532},
-		"MAILPIT_SMTP_PORT":  {1025, 1125},
-		"MAILPIT_UI_PORT":    {8025, 8125},
-		"LOCALSTACK_PORT":    {4566, 4666},
+// BuildPortRanges constructs port ranges from WorktreeConfig
+// All port ranges must be defined in the configuration file
+func BuildPortRanges(workCfg *config.WorktreeConfig) map[string][2]int {
+	ranges := make(map[string][2]int)
+
+	if workCfg == nil {
+		return ranges
 	}
+
+	// Read all configured port ranges
+	for serviceName, portCfg := range workCfg.Ports {
+		if portRange := portCfg.GetPortRange(); portRange != nil {
+			ranges[serviceName] = *portRange
+		}
+	}
+
+	return ranges
 }
 
 // Load loads the registry from disk, or creates a new one if it doesn't exist
-func Load(worktreeDir string) (*Registry, error) {
+// workCfg is optional - if provided, port ranges are loaded from configuration
+func Load(worktreeDir string, workCfg *config.WorktreeConfig) (*Registry, error) {
 	registryPath := filepath.Join(worktreeDir, registryFileName)
+
+	// Build port ranges from config (with defaults as fallback)
+	portRanges := BuildPortRanges(workCfg)
 
 	r := &Registry{
 		Worktrees:  make(map[string]*Worktree),
-		PortRanges: DefaultPortRanges(),
+		PortRanges: portRanges,
 		filePath:   registryPath,
 	}
 
@@ -72,7 +84,8 @@ func Load(worktreeDir string) (*Registry, error) {
 		return nil, fmt.Errorf("failed to parse registry: %w", err)
 	}
 
-	// Restore file path (not serialized)
+	// Override with configured port ranges (config is source of truth)
+	r.PortRanges = portRanges
 	r.filePath = registryPath
 
 	return r, nil

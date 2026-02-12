@@ -36,8 +36,12 @@ func runStop(cmd *cobra.Command, args []string) {
 	cfg, err := config.New()
 	checkError(err)
 
+	// Load worktree configuration
+	workCfg, err := config.LoadWorktreeConfig(cfg.ProjectRoot)
+	checkError(err)
+
 	// Load registry
-	reg, err := registry.Load(cfg.WorktreeDir)
+	reg, err := registry.Load(cfg.WorktreeDir, workCfg)
 	checkError(err)
 
 	// Get worktree from registry
@@ -57,7 +61,7 @@ func runStop(cmd *cobra.Command, args []string) {
 	ui.NewLine()
 
 	// Check if feature is running
-	if !docker.IsFeatureRunning(featureName) {
+	if !docker.IsFeatureRunning(workCfg.ProjectName, featureName) {
 		ui.Info(fmt.Sprintf("Feature '%s' is not running", featureName))
 		os.Exit(0)
 	}
@@ -67,7 +71,7 @@ func runStop(cmd *cobra.Command, args []string) {
 
 	// Stop feature services
 	ui.Loading("Stopping services...")
-	if err := docker.StopFeature(featureName, featurePath); err != nil {
+	if err := docker.StopFeature(workCfg.ProjectName, featureName, featurePath); err != nil {
 		ui.Error(fmt.Sprintf("Failed to stop services: %v", err))
 		os.Exit(1)
 	}

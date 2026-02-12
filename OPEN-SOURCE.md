@@ -7,7 +7,7 @@ Generic git worktree management tool for multi-instance development environments
 Worktree Manager is a CLI tool that helps teams work on multiple features in parallel by:
 - Creating coordinated git worktrees across multiple repositories
 - Managing isolated development instances with Docker
-- Running migrations and fixtures automatically
+- Running post-startup commands automatically
 - Providing one-command feature setup
 
 **Perfect for:**
@@ -48,8 +48,7 @@ projects:
     dir: backend
     main_branch: main
     start_command: "docker-compose up -d"
-    migration_command: "npm run migrate"
-    post_command: "npm run seed"
+    post_command: "npm run migrate && npm run seed"
     claude_working_dir: true
 
   frontend:
@@ -65,7 +64,6 @@ presets:
 default_preset: fullstack
 max_instances: 5
 auto_fixtures: true
-auto_migrations: true
 ```
 
 ### 2. One-Command Setup
@@ -77,9 +75,8 @@ worktree new-feature "Add user authentication" 1
 This:
 1. Creates worktrees for backend + frontend
 2. Starts all services
-3. Runs migrations
-4. Loads seed data
-5. Ready to code!
+3. Runs post-startup commands (migrations, seed data)
+4. Ready to code!
 
 ### 3. Work on Feature
 
@@ -111,8 +108,7 @@ projects:
 
     # Optional
     start_command: "..."              # Start services ({instance} placeholder)
-    migration_command: "..."          # Run migrations
-    post_command: "..."               # Run after start (fixtures, seed)
+    post_command: "..."               # Run after start (migrations, fixtures, seed)
     claude_working_dir: true          # Set as working directory
 ```
 
@@ -137,7 +133,7 @@ Commands support `{instance}` placeholder:
 
 ```yaml
 start_command: "docker-compose up -d --project-name myapp-{instance}"
-migration_command: "DB_PORT=543{instance} npm run migrate"
+post_command: "DB_PORT=543{instance} npm run migrate && npm run seed"
 ```
 
 ---
@@ -155,7 +151,6 @@ worktree new-feature "Fix bug" 2 backend --no-fixtures
 
 **Flags:**
 - `--no-fixtures` - Skip post-commands
-- `--no-migrations` - Skip migrations
 
 ### `worktree create <branch> <instance>`
 
@@ -316,7 +311,7 @@ start_command: "docker-compose up -p myapp-{instance} --env-file .env.{instance}
 | Multi-repo | ✅ | ❌ | ❌ |
 | Auto-start services | ✅ | ❌ | Partial |
 | Port allocation | ✅ | ❌ | Manual |
-| Migrations | ✅ | ❌ | Manual |
+| Post-commands | ✅ | ❌ | Manual |
 | One command | ✅ | ❌ | ❌ |
 
 ---

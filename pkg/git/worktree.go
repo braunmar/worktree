@@ -3,6 +3,7 @@ package git
 import (
 	"bytes"
 	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -42,10 +43,22 @@ func CreateWorktree(repoPath, worktreePath, branch string) error {
 	}
 
 	var stderr bytes.Buffer
+	var stdout bytes.Buffer
 	cmd.Stderr = &stderr
+	cmd.Stdout = &stdout
 
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("failed to create worktree: %s", stderr.String())
+		// Combine stdout and stderr for better error context
+		errMsg := stderr.String()
+		if outMsg := stdout.String(); outMsg != "" {
+			errMsg = outMsg + "\n" + errMsg
+		}
+		return fmt.Errorf("git command failed: %s", strings.TrimSpace(errMsg))
+	}
+
+	// Validate that the worktree was actually created
+	if _, err := os.Stat(absWorktreePath); os.IsNotExist(err) {
+		return fmt.Errorf("worktree directory was not created at %s", absWorktreePath)
 	}
 
 	return nil
