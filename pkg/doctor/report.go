@@ -178,7 +178,7 @@ func (r *Report) printStaleness() {
 
 	for _, s := range r.Staleness {
 		ui.NewLine()
-		fmt.Printf("  %s (%s)\n", s.Feature, s.Feature)
+		fmt.Printf("  %s (%s)\n", s.Feature, s.Branch)
 
 		if s.DaysSinceModified >= 7 {
 			ui.Warning(fmt.Sprintf("    🕐 Last modified: %d days ago", s.DaysSinceModified))

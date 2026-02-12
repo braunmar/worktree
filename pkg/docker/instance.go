@@ -3,7 +3,6 @@ package docker
 import (
 	"bytes"
 	"fmt"
-	"os"
 	"os/exec"
 	"strings"
 )
@@ -95,9 +94,8 @@ func StopFeature(projectName, featureName string, worktreePath string) error {
 
 // stopViaCompose runs docker compose down in the specified directory
 func stopViaCompose(dir string, composeProject string) error {
-	cmd := exec.Command("docker", "compose", "down", "--remove-orphans")
+	cmd := exec.Command("docker", "compose", "-p", composeProject, "down", "--remove-orphans")
 	cmd.Dir = dir
-	cmd.Env = append(os.Environ(), fmt.Sprintf("COMPOSE_PROJECT_NAME=%s", composeProject))
 
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr

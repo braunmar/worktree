@@ -53,6 +53,7 @@ type GitStatusReport struct {
 // StalenessReport contains staleness metrics for a worktree
 type StalenessReport struct {
 	Feature           string
+	Branch            string
 	LastModified      time.Time
 	DaysSinceModified int
 	BranchMerged      bool

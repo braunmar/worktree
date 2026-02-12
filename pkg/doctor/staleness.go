@@ -15,6 +15,7 @@ import (
 func CheckStaleness(cfg *config.Config, wt *registry.Worktree, projectName string) StalenessReport {
 	report := StalenessReport{
 		Feature: wt.Normalized,
+		Branch:  wt.Branch,
 	}
 
 	// Check if directory exists
