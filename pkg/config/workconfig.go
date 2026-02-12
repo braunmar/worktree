@@ -182,13 +182,31 @@ func ReplaceInstancePlaceholder(command string, instance int) string {
 	return strings.ReplaceAll(command, "{instance}", fmt.Sprintf("%d", instance))
 }
 
-// CalculatePort evaluates a port expression like "3000 + {instance}"
+// CalculatePort evaluates a port expression like "3000 + {instance}" or "4510 + {instance} * 50"
 func CalculatePort(expression string, instance int) int {
 	// Replace {instance} with actual value
 	expr := strings.ReplaceAll(expression, "{instance}", fmt.Sprintf("%d", instance))
 	expr = strings.TrimSpace(expr)
 
-	// Simple evaluation: handle "base + instance" format
+	// Handle "base + value * multiplier" format (e.g., "4510 + 2 * 50")
+	if strings.Contains(expr, "+") && strings.Contains(expr, "*") {
+		parts := strings.Split(expr, "+")
+		if len(parts) == 2 {
+			var base int
+			fmt.Sscanf(strings.TrimSpace(parts[0]), "%d", &base)
+
+			// Parse multiplication in second part
+			multParts := strings.Split(strings.TrimSpace(parts[1]), "*")
+			if len(multParts) == 2 {
+				var factor1, factor2 int
+				fmt.Sscanf(strings.TrimSpace(multParts[0]), "%d", &factor1)
+				fmt.Sscanf(strings.TrimSpace(multParts[1]), "%d", &factor2)
+				return base + (factor1 * factor2)
+			}
+		}
+	}
+
+	// Handle simple "base + offset" format
 	if strings.Contains(expr, "+") {
 		parts := strings.Split(expr, "+")
 		if len(parts) == 2 {
@@ -229,8 +247,8 @@ func (pc *PortConfig) GetValue(instance int) string {
 func (c *WorktreeConfig) ExportEnvVars(instance int) map[string]string {
 	envVars := make(map[string]string)
 
-	// Always export INSTANCE_ID
-	envVars["INSTANCE_ID"] = fmt.Sprintf("%d", instance)
+	// Always export INSTANCE
+	envVars["INSTANCE"] = fmt.Sprintf("%d", instance)
 
 	for _, portCfg := range c.Ports {
 		if portCfg.Env != "" {
@@ -267,7 +285,7 @@ func (pc *PortConfig) GetPortRange() *[2]int {
 
 	// 2. If port expression exists, extract base and calculate range
 	if pc.Port != "" {
-		base := extractBasePort(pc.Port)
+		base := ExtractBasePort(pc.Port)
 		if base > 0 {
 			return &[2]int{base, base + 100} // Default: 100 port range
 		}
@@ -277,8 +295,8 @@ func (pc *PortConfig) GetPortRange() *[2]int {
 	return nil
 }
 
-// extractBasePort extracts base port from expressions like "3000 + {instance}"
-func extractBasePort(expr string) int {
+// ExtractBasePort extracts base port from expressions like "3000 + {instance}"
+func ExtractBasePort(expr string) int {
 	// Handle "base + {instance}" format
 	if strings.Contains(expr, "+") {
 		parts := strings.Split(expr, "+")

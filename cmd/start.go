@@ -98,10 +98,16 @@ func runStart(cmd *cobra.Command, args []string) {
 	}
 	ui.NewLine()
 
-	// Prepare base environment variables (shared across all projects)
-	baseEnvVars := map[string]string{
-		"FEATURE_NAME": featureName,
-	}
+	// Calculate instance from allocated APP_PORT in registry
+	appPortCfg := workCfg.Ports["APP_PORT"]
+	basePort := config.ExtractBasePort(appPortCfg.Port)
+	instance := wt.Ports["APP_PORT"] - basePort
+
+	// Export all environment variables (includes allocated ports + calculated values like INSTANCE, LOCALSTACK_EXT_*)
+	baseEnvVars := workCfg.ExportEnvVars(instance)
+	baseEnvVars["FEATURE_NAME"] = featureName
+
+	// Override with allocated ports from registry
 	for service, port := range wt.Ports {
 		baseEnvVars[service] = fmt.Sprintf("%d", port)
 	}

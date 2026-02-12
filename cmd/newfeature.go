@@ -94,8 +94,14 @@ func runNewFeature(cmd *cobra.Command, args []string) {
 	ports, err := reg.AllocatePorts(services)
 	checkError(err)
 
+	// Calculate INSTANCE from allocated APP_PORT (base port is 8080)
+	appPortCfg := workCfg.Ports["APP_PORT"]
+	basePort := config.ExtractBasePort(appPortCfg.Port)
+	instance := ports["APP_PORT"] - basePort
+
 	// Display allocated ports
 	ui.CheckMark("Ports allocated")
+	ui.Info(fmt.Sprintf("Instance: %d", instance))
 	ui.NewLine()
 
 	// Create feature directory
@@ -227,10 +233,11 @@ func runNewFeature(cmd *cobra.Command, args []string) {
 	ui.CheckMark("Registry updated")
 	ui.NewLine()
 
-	// Prepare base environment variables (shared across all projects)
-	baseEnvVars := map[string]string{
-		"FEATURE_NAME": featureName,
-	}
+	// Export all environment variables (includes allocated ports + calculated values like INSTANCE, LOCALSTACK_EXT_*)
+	baseEnvVars := workCfg.ExportEnvVars(instance)
+	baseEnvVars["FEATURE_NAME"] = featureName
+
+	// Override with actually allocated ports (in case of conflicts)
 	for service, port := range ports {
 		baseEnvVars[service] = fmt.Sprintf("%d", port)
 	}
