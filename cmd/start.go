@@ -139,6 +139,13 @@ func runStart(cmd *cobra.Command, args []string) {
 
 	featureDir := cfg.WorktreeFeaturePath(featureName)
 
+	// Generate configured files for each project (e.g., .env.development.local)
+	for _, projectName := range projects {
+		if err := workCfg.GenerateFiles(projectName, featureDir, baseEnvVars); err != nil {
+			ui.Warning(fmt.Sprintf("Failed to generate files for %s: %v", projectName, err))
+		}
+	}
+
 	// Start ALL projects sequentially
 	for i, projectName := range projects {
 		project := workCfg.Projects[projectName]

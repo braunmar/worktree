@@ -17,16 +17,17 @@ type FileLink struct {
 
 // WorktreeConfig represents the .worktree.yml configuration
 type WorktreeConfig struct {
-	ProjectName   string                      `yaml:"project_name"`
-	Hostname      string                      `yaml:"hostname"`
-	Projects      map[string]ProjectConfig    `yaml:"projects"`
-	Presets       map[string]PresetConfig     `yaml:"presets"`
-	DefaultPreset string                      `yaml:"default_preset"`
-	MaxInstances  int                         `yaml:"max_instances"`
-	AutoFixtures  bool                        `yaml:"auto_fixtures"`
-	Symlinks      []FileLink                  `yaml:"symlinks"`
-	Copies        []FileLink                  `yaml:"copies"`
-	Ports         map[string]PortConfig       `yaml:"ports"`
+	ProjectName    string                         `yaml:"project_name"`
+	Hostname       string                         `yaml:"hostname"`
+	Projects       map[string]ProjectConfig       `yaml:"projects"`
+	Presets        map[string]PresetConfig        `yaml:"presets"`
+	DefaultPreset  string                         `yaml:"default_preset"`
+	MaxInstances   int                            `yaml:"max_instances"`
+	AutoFixtures   bool                           `yaml:"auto_fixtures"`
+	Symlinks       []FileLink                     `yaml:"symlinks"`
+	Copies         []FileLink                     `yaml:"copies"`
+	Ports          map[string]PortConfig          `yaml:"ports"`
+	GeneratedFiles map[string][]GeneratedFile `yaml:"generated_files"`
 }
 
 // PortConfig represents a port/service display configuration
@@ -52,6 +53,12 @@ type ProjectConfig struct {
 type PresetConfig struct {
 	Projects    []string `yaml:"projects"`
 	Description string   `yaml:"description"`
+}
+
+// GeneratedFile represents a file to be auto-generated in a worktree
+type GeneratedFile struct {
+	Path     string `yaml:"path"`     // File path relative to project directory
+	Template string `yaml:"template"` // Template content with {PLACEHOLDER} substitution
 }
 
 // validateProjectName validates that project name only contains alphanumeric characters and hyphens
@@ -346,8 +353,8 @@ func (pc *PortConfig) GetURL(hostname string, port int) string {
 }
 
 // GetValue calculates the value for this port config (either port or string template)
-// Returns empty string if port calculation fails
-func (pc *PortConfig) GetValue(instance int) string {
+// Returns empty string if calculation fails
+func (pc *PortConfig) GetValue(instance int, envVars map[string]string) string {
 	if pc.Port != "" {
 		// Port calculation
 		port, err := CalculatePort(pc.Port, instance)
@@ -358,8 +365,19 @@ func (pc *PortConfig) GetValue(instance int) string {
 		}
 		return fmt.Sprintf("%d", port)
 	} else if pc.Value != "" {
-		// String template (e.g., "myproject-inst{instance}")
-		return strings.ReplaceAll(pc.Value, "{instance}", fmt.Sprintf("%d", instance))
+		// String template - substitute placeholders
+		result := pc.Value
+
+		// First substitute {instance}
+		result = strings.ReplaceAll(result, "{instance}", fmt.Sprintf("%d", instance))
+
+		// Then substitute port variables like {BE_PORT}, {FE_PORT}, etc.
+		for key, value := range envVars {
+			placeholder := fmt.Sprintf("{%s}", key)
+			result = strings.ReplaceAll(result, placeholder, value)
+		}
+
+		return result
 	}
 	return ""
 }
@@ -368,12 +386,23 @@ func (pc *PortConfig) GetValue(instance int) string {
 func (c *WorktreeConfig) ExportEnvVars(instance int) map[string]string {
 	envVars := make(map[string]string)
 
-	// Always export INSTANCE
+	// Always export INSTANCE first
 	envVars["INSTANCE"] = fmt.Sprintf("%d", instance)
 
+	// First pass: Export all port values (both allocated and calculated ports)
 	for _, portCfg := range c.Ports {
-		if portCfg.Env != "" {
-			value := portCfg.GetValue(instance)
+		if portCfg.Env != "" && portCfg.Port != "" {
+			value := portCfg.GetValue(instance, envVars)
+			if value != "" {
+				envVars[portCfg.Env] = value
+			}
+		}
+	}
+
+	// Second pass: Export string templates that depend on ports
+	for _, portCfg := range c.Ports {
+		if portCfg.Env != "" && portCfg.Value != "" {
+			value := portCfg.GetValue(instance, envVars)
 			if value != "" {
 				envVars[portCfg.Env] = value
 			}
@@ -381,6 +410,39 @@ func (c *WorktreeConfig) ExportEnvVars(instance int) map[string]string {
 	}
 
 	return envVars
+}
+
+// GenerateFiles creates configured files for a project with templated content
+// Uses the same placeholder substitution as environment variables
+func (c *WorktreeConfig) GenerateFiles(projectName, featureDir string, envVars map[string]string) error {
+	files, ok := c.GeneratedFiles[projectName]
+	if !ok {
+		return nil // No files to generate for this project
+	}
+
+	projectConfig, exists := c.Projects[projectName]
+	if !exists {
+		return fmt.Errorf("project '%s' not found in configuration", projectName)
+	}
+
+	projectPath := filepath.Join(featureDir, projectConfig.Dir)
+
+	for _, file := range files {
+		// Substitute placeholders in template
+		content := file.Template
+		for key, value := range envVars {
+			placeholder := fmt.Sprintf("{%s}", key)
+			content = strings.ReplaceAll(content, placeholder, value)
+		}
+
+		// Write file
+		filePath := filepath.Join(projectPath, file.Path)
+		if err := os.WriteFile(filePath, []byte(content), 0644); err != nil {
+			return fmt.Errorf("failed to generate %s: %w", file.Path, err)
+		}
+	}
+
+	return nil
 }
 
 // GetClaudeWorkingProject returns the project configured as Claude's working directory

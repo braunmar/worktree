@@ -276,6 +276,13 @@ func runNewFeature(cmd *cobra.Command, args []string) {
 		baseEnvVars[service] = fmt.Sprintf("%d", port)
 	}
 
+	// Generate configured files for each project (e.g., .env.development.local)
+	for _, projectName := range presetCfg.Projects {
+		if err := workCfg.GenerateFiles(projectName, featureDir, baseEnvVars); err != nil {
+			ui.Warning(fmt.Sprintf("Failed to generate files for %s: %v", projectName, err))
+		}
+	}
+
 	// Start services for each project
 	ui.Section("Starting services...")
 	for _, projectName := range presetCfg.Projects {

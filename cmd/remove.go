@@ -147,7 +147,22 @@ func runRemove(cmd *cobra.Command, args []string) {
 	// Always stop services before removing (prevents stale containers)
 	ui.Info("Stopping services (if running)...")
 	featurePath := cfg.WorktreeFeaturePath(featureName)
-	if err := docker.StopFeature(workCfg.ProjectName, featureName, featurePath); err != nil {
+
+	// Build map of project directory to compose project name
+	projectInfo := make(map[string]string)
+	for _, projectName := range projects {
+		if projectCfg, exists := workCfg.Projects[projectName]; exists {
+			// Get the compose project name for this project from registry
+			composeName := wt.GetComposeProject(projectName)
+			if composeName == "" {
+				// Fallback to default naming if not in registry
+				composeName = fmt.Sprintf("%s-%s-%s", workCfg.ProjectName, featureName, projectName)
+			}
+			projectInfo[projectCfg.Dir] = composeName
+		}
+	}
+
+	if err := docker.StopFeature(workCfg.ProjectName, featureName, featurePath, projectInfo); err != nil {
 		ui.Warning(fmt.Sprintf("Failed to stop services: %v", err))
 		ui.Info("Continuing with removal...")
 	} else {

@@ -69,9 +69,23 @@ func runStop(cmd *cobra.Command, args []string) {
 	// Get worktree path
 	featurePath := cfg.WorktreeFeaturePath(featureName)
 
+	// Build map of project directory to compose project name
+	projectInfo := make(map[string]string)
+	for _, projectName := range wt.Projects {
+		if projectCfg, exists := workCfg.Projects[projectName]; exists {
+			// Get the compose project name for this project from registry
+			composeName := wt.GetComposeProject(projectName)
+			if composeName == "" {
+				// Fallback to default naming if not in registry
+				composeName = fmt.Sprintf("%s-%s-%s", workCfg.ProjectName, featureName, projectName)
+			}
+			projectInfo[projectCfg.Dir] = composeName
+		}
+	}
+
 	// Stop feature services
 	ui.Loading("Stopping services...")
-	if err := docker.StopFeature(workCfg.ProjectName, featureName, featurePath); err != nil {
+	if err := docker.StopFeature(workCfg.ProjectName, featureName, featurePath, projectInfo); err != nil {
 		ui.Error(fmt.Sprintf("Failed to stop services: %v", err))
 		os.Exit(1)
 	}

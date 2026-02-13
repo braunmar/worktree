@@ -69,26 +69,47 @@ func GetRunningFeatures(projectName string) ([]string, error) {
 }
 
 // StopFeature stops a specific feature worktree using a multi-tier approach
-func StopFeature(projectName, featureName string, worktreePath string) error {
-	composeProject := fmt.Sprintf("%s-%s", projectName, featureName)
-	backendDir := worktreePath + "/backend"
+// It stops containers for all active projects (backend, frontend, etc.)
+// projectInfo maps project directory to its compose project name
+func StopFeature(projectName, featureName string, worktreePath string, projectInfo map[string]string) error {
+	defaultComposeProject := fmt.Sprintf("%s-%s", projectName, featureName)
 
-	// Tier 1: Try docker compose down in backend directory
-	if err := stopViaCompose(backendDir, composeProject); err == nil {
+	// Tier 1: Try docker compose down in each project directory with correct compose project name
+	allStopped := true
+	for projectDir, composeName := range projectInfo {
+		fullPath := worktreePath + "/" + projectDir
+		if err := stopViaCompose(fullPath, composeName); err != nil {
+			allStopped = false
+		}
+	}
+	if allStopped && len(projectInfo) > 0 {
 		return nil
 	}
 
-	// Tier 2: Try docker compose with explicit project name (no directory needed)
-	if err := stopViaComposeProject(composeProject); err == nil {
+	// Tier 2: Try docker compose with explicit project names (no directory needed)
+	allStopped = true
+	for _, composeName := range projectInfo {
+		if err := stopViaComposeProject(composeName); err != nil {
+			allStopped = false
+		}
+	}
+	if allStopped && len(projectInfo) > 0 {
 		return nil
 	}
 
-	// Tier 3: Fall back to stopping individual containers
-	if err := stopContainersByName(composeProject); err == nil {
+	// Tier 3: Fall back to stopping individual containers by compose project names
+	for _, composeName := range projectInfo {
+		if err := stopContainersByName(composeName); err != nil {
+			// Continue trying other projects even if one fails
+		}
+	}
+
+	// Tier 4: Last resort - try with default compose project name (for legacy compatibility)
+	if err := stopContainersByName(defaultComposeProject); err == nil {
 		return nil
 	}
 
-	// Tier 4: If all methods fail, return error but allow removal to continue
+	// If all methods fail, return error but allow removal to continue
 	return fmt.Errorf("unable to stop services (docker may not be available)")
 }
 
