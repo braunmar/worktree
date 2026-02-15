@@ -143,3 +143,8 @@ func Progress(current, total int, message string) {
 func ProgressWithName(current, total int, itemName, action string) {
 	fmt.Printf("%s %s %s... (%d/%d)\n", "⏳", action, itemName, current, total)
 }
+
+// Bold returns a bold-formatted string
+func Bold(text string) string {
+	return bold(text)
+}

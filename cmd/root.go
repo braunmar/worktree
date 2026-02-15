@@ -41,6 +41,7 @@ func init() {
 	rootCmd.AddCommand(newFeatureCmd)
 	rootCmd.AddCommand(doctorCmd)
 	rootCmd.AddCommand(yoloCmd)
+	rootCmd.AddCommand(agentCmd)
 
 	// Customize help template
 	rootCmd.SetHelpTemplate(`{{.Long}}

@@ -17,17 +17,18 @@ type FileLink struct {
 
 // WorktreeConfig represents the .worktree.yml configuration
 type WorktreeConfig struct {
-	ProjectName    string                         `yaml:"project_name"`
-	Hostname       string                         `yaml:"hostname"`
-	Projects       map[string]ProjectConfig       `yaml:"projects"`
-	Presets        map[string]PresetConfig        `yaml:"presets"`
-	DefaultPreset  string                         `yaml:"default_preset"`
-	MaxInstances   int                            `yaml:"max_instances"`
-	AutoFixtures   bool                           `yaml:"auto_fixtures"`
-	Symlinks       []FileLink                     `yaml:"symlinks"`
-	Copies         []FileLink                     `yaml:"copies"`
-	Ports          map[string]PortConfig          `yaml:"ports"`
-	GeneratedFiles map[string][]GeneratedFile `yaml:"generated_files"`
+	ProjectName     string                     `yaml:"project_name"`
+	Hostname        string                     `yaml:"hostname"`
+	Projects        map[string]ProjectConfig   `yaml:"projects"`
+	Presets         map[string]PresetConfig    `yaml:"presets"`
+	DefaultPreset   string                     `yaml:"default_preset"`
+	MaxInstances    int                        `yaml:"max_instances"`
+	AutoFixtures    bool                       `yaml:"auto_fixtures"`
+	Symlinks        []FileLink                 `yaml:"symlinks"`
+	Copies          []FileLink                 `yaml:"copies"`
+	Ports           map[string]PortConfig      `yaml:"ports"`
+	GeneratedFiles  map[string][]GeneratedFile `yaml:"generated_files"`
+	ScheduledAgents ScheduledAgents            `yaml:"scheduled_agents"` // NEW: Scheduled agent tasks
 }
 
 // PortConfig represents a port/service display configuration

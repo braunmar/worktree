@@ -258,3 +258,161 @@ ports:
 #    - Replace hardcoded ports in docker-compose.yml with ${PORT_VAR}
 #    - Update scripts to use environment variables
 #    - Test with 'worktree new-feature' to verify allocation works
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# SCHEDULED AGENTS - Automated Maintenance Tasks
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+#
+# Scheduled agents automate maintenance tasks like security updates, dependency
+# updates, code quality checks, and more.
+#
+# SCHEDULER OPTIONS:
+#
+# 1. Built-in Go Scheduler (Recommended):
+#    worktree agent daemon               # Run in foreground
+#    worktree agent install-service      # Install as system service
+#
+# 2. OS Schedulers (Alternative):
+#    worktree agent schedule <task>      # Generate cron/launchd config
+#
+# CRON EXPRESSION FORMAT (5 fields):
+# ┌───────────── minute (0-59)
+# │ ┌───────────── hour (0-23)
+# │ │ ┌───────────── day of month (1-31)
+# │ │ │ ┌───────────── month (1-12)
+# │ │ │ │ ┌───────────── day of week (0-6) (Sunday=0)
+# │ │ │ │ │
+# * * * * *
+#
+# Examples:
+# - "0 9 * * MON"     = Every Monday at 9:00 AM
+# - "0 0 1 * *"       = First day of month at midnight
+# - "*/15 * * * *"    = Every 15 minutes
+#
+# See full documentation: tools/worktree-manager/AGENTS.md
+#
+scheduled_agents:
+  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  # Example: NPM Security Audit & Fix
+  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  npm-audit:
+    name: "NPM Security Audit & Fix"
+    description: "Check and fix npm vulnerabilities in frontend"
+    schedule: "0 9 * * MON"  # Every Monday at 9:00 AM
+
+    context:
+      preset: frontend      # Which projects to work on
+      branch: main         # Base branch
+      instance: 91         # Instance number (use 90-99 for agents)
+      yolo: true           # Autonomous mode (no confirmations)
+
+    steps:
+      - name: "Run npm audit fix"
+        type: shell
+        command: "npm audit fix --audit-level=moderate"
+        working_dir: "frontend"
+
+      - name: "Update package-lock.json"
+        type: shell
+        command: "npm install"
+        working_dir: "frontend"
+
+    safety:
+      gates:
+        - name: "Lint check"
+          command: "cd frontend && npm run lint"
+          required: true              # Blocks commit if fails
+
+        - name: "Build check"
+          command: "cd frontend && npm run build"
+          required: true
+
+        - name: "Unit tests"
+          command: "cd frontend && npm test -- --watchAll=false"
+          required: false             # Warns only if fails
+
+      git:
+        branch: "automated/npm-audit-{date}"
+        commit_message: |
+          chore: npm audit fix
+
+          Automated security fixes from npm audit.
+
+          Co-Authored-By: Worktree Manager Agent <noreply@example.com>
+        push:
+          enabled: true
+          create_pr: true
+          pr_title: "Security: NPM Audit Fixes ({date})"
+          pr_body: |
+            ## Automated NPM Audit Fixes
+
+            Quality gates: Lint ✅ | Build ✅ | Tests ⚠️ (optional)
+
+            Review and merge if all checks pass.
+          auto_merge: false
+
+      rollback:
+        enabled: true
+        strategy: "cleanup-worktree"
+
+    notifications:
+      on_failure:
+        - type: gitlab_issue
+          project: "myproject/frontend"
+          title: "NPM Audit: Failed ({date})"
+          labels: ["security", "automated", "failed"]
+
+  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  # Example: Go Dependencies Update
+  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  go-deps-update:
+    name: "Go Dependencies Update"
+    description: "Update Go dependencies in backend"
+    schedule: "0 10 * * MON"  # Every Monday at 10:00 AM
+
+    context:
+      preset: backend
+      branch: main
+      instance: 92
+      yolo: true
+
+    steps:
+      - name: "Update dependencies"
+        type: shell
+        command: "go get -u ./... && go mod tidy"
+        working_dir: "backend"
+
+    safety:
+      gates:
+        - name: "Go vet"
+          command: "cd backend && go vet ./..."
+          required: true
+        - name: "Unit tests"
+          command: "cd backend && make test-unit"
+          required: true
+
+      git:
+        branch: "automated/go-deps-{date}"
+        commit_message: "chore: update Go dependencies"
+        push:
+          enabled: true
+          create_pr: true
+          pr_title: "Dependencies: Go Update ({date})"
+          auto_merge: false
+
+      rollback:
+        enabled: true
+        strategy: "cleanup-worktree"
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# AGENT MANAGEMENT COMMANDS
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+#
+# worktree agent list                      # List all configured agents
+# worktree agent validate <name>           # Validate configuration
+# worktree agent run <name>                # Run manually (testing)
+# worktree agent daemon                    # Start scheduler daemon
+# worktree agent install-service           # Install as system service
+#
+# Documentation: tools/worktree-manager/AGENTS.md
+#
