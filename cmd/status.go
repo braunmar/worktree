@@ -64,6 +64,13 @@ func runStatus(cmd *cobra.Command, args []string) {
 	// Show basic info
 	ui.PrintStatusLine("Branch", wt.Branch)
 	ui.PrintStatusLine("Created", wt.Created.Format("2006-01-02 15:04"))
+
+	// Show YOLO mode status
+	yoloStatus := "🛡️  Disabled"
+	if wt.YoloMode {
+		yoloStatus = "🚀 Enabled (Claude works autonomously)"
+	}
+	ui.PrintStatusLine("YOLO Mode", yoloStatus)
 	ui.NewLine()
 
 	// Check worktree status

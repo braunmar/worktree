@@ -40,6 +40,7 @@ func init() {
 	rootCmd.AddCommand(portsCmd)
 	rootCmd.AddCommand(newFeatureCmd)
 	rootCmd.AddCommand(doctorCmd)
+	rootCmd.AddCommand(yoloCmd)
 
 	// Customize help template
 	rootCmd.SetHelpTemplate(`{{.Long}}

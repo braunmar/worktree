@@ -20,6 +20,7 @@ var (
 	preset       string
 	noFixturesNF bool
 	dryRun       bool
+	yoloModeNF   bool
 )
 
 var newFeatureCmd = &cobra.Command{
@@ -40,7 +41,8 @@ Examples:
   worktree new-feature feature/user-auth              # Use default preset
   worktree new-feature feature/reports fullstack      # Use fullstack preset
   worktree new-feature feature/api backend            # Backend only
-  worktree new-feature feature/ui --no-fixtures       # Skip fixtures`,
+  worktree new-feature feature/ui --no-fixtures       # Skip fixtures
+  worktree new-feature feature/coverage --yolo        # Enable YOLO mode`,
 	Args: cobra.RangeArgs(1, 2),
 	Run:  runNewFeature,
 }
@@ -48,6 +50,7 @@ Examples:
 func init() {
 	newFeatureCmd.Flags().BoolVar(&noFixturesNF, "no-fixtures", false, "skip running fixtures")
 	newFeatureCmd.Flags().BoolVar(&dryRun, "dry-run", false, "preview changes without creating anything")
+	newFeatureCmd.Flags().BoolVar(&yoloModeNF, "yolo", false, "enable YOLO mode (Claude works autonomously)")
 }
 
 func runNewFeature(cmd *cobra.Command, args []string) {
@@ -257,6 +260,7 @@ func runNewFeature(cmd *cobra.Command, args []string) {
 		Projects:        presetCfg.Projects,
 		Ports:           ports,
 		ComposeProjects: composeProjects,
+		YoloMode:        yoloModeNF,
 	}
 	if err := reg.Add(wt); err != nil {
 		checkError(err)
@@ -402,6 +406,11 @@ func runNewFeature(cmd *cobra.Command, args []string) {
 	ui.PrintHeader("Claude is ready to work:")
 	ui.PrintStatusLine("  Working directory", claudePath)
 	ui.PrintStatusLine("  Feature name", featureName)
+
+	// Show YOLO mode status
+	if wt.YoloMode {
+		ui.PrintStatusLine("  YOLO Mode", "🚀 Enabled (autonomous mode)")
+	}
 	ui.NewLine()
 
 	// Show access URLs dynamically from config

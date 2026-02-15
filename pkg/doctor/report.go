@@ -165,6 +165,11 @@ func (r *Report) printGitStatus() {
 		if gs.AheadOrigin > 0 {
 			ui.Info(fmt.Sprintf("    %d commits ahead of origin (unpushed)", gs.AheadOrigin))
 		}
+
+		// YOLO mode
+		if gs.YoloMode {
+			ui.Info("    🚀 YOLO mode enabled")
+		}
 	}
 }
 

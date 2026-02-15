@@ -26,6 +26,7 @@ type Worktree struct {
 	Ports           map[string]int    `json:"ports"`
 	ComposeProject  string            `json:"compose_project,omitempty"`  // Deprecated: use ComposeProjects
 	ComposeProjects map[string]string `json:"compose_projects,omitempty"` // Per-service compose project names
+	YoloMode        bool              `json:"yolo_mode,omitempty"`        // YOLO mode: Claude works autonomously when solution is clear
 }
 
 // GetComposeProject returns the compose project name for a specific service

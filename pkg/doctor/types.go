@@ -47,6 +47,7 @@ type GitStatusReport struct {
 	BehindMain       int
 	AheadOrigin      int
 	BranchExists     bool
+	YoloMode         bool
 	Error            string
 }
 

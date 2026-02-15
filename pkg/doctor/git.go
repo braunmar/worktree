@@ -14,8 +14,9 @@ import (
 // CheckGitStatus checks git status for a worktree
 func CheckGitStatus(cfg *config.Config, wt *registry.Worktree, fetch bool) GitStatusReport {
 	report := GitStatusReport{
-		Feature: wt.Normalized,
-		Branch:  wt.Branch,
+		Feature:  wt.Normalized,
+		Branch:   wt.Branch,
+		YoloMode: wt.YoloMode,
 	}
 
 	backendPath := cfg.WorktreeBackendPath(wt.Normalized)
