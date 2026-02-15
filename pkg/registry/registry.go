@@ -227,7 +227,7 @@ func (r *Registry) FindAvailablePort(service string) (int, error) {
 		errorMsg += fmt.Sprintf("\nCurrently allocated:\n  %s", strings.Join(allocatedInfo, "\n  "))
 	}
 
-	return 0, fmt.Errorf(errorMsg)
+	return 0, fmt.Errorf("%s", errorMsg)
 }
 
 // AllocatePorts allocates ports for all specified services

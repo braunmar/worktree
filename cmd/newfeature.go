@@ -269,6 +269,13 @@ func runNewFeature(cmd *cobra.Command, args []string) {
 		checkError(err)
 	}
 	ui.CheckMark("Registry updated")
+
+	// Write .worktree-instance marker file
+	if err := config.WriteInstanceMarker(featureDir, featureName, instance, cfg.ProjectRoot, presetCfg.Projects, ports, yoloModeNF); err != nil {
+		ui.Warning(fmt.Sprintf("Failed to write instance marker: %v", err))
+	} else {
+		ui.CheckMark("Instance marker created")
+	}
 	ui.NewLine()
 
 	// Export all environment variables (includes allocated ports + calculated values like INSTANCE, LOCALSTACK_EXT_*)

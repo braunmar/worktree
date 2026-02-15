@@ -12,7 +12,7 @@ import (
 )
 
 var portsCmd = &cobra.Command{
-	Use:   "ports <feature-name>",
+	Use:   "ports [feature-name]",
 	Short: "Show port mapping for a feature",
 	Long: `Show port mapping for a specific feature worktree.
 
@@ -24,15 +24,34 @@ Displays:
 - Mailpit SMTP port
 - LocalStack port
 
-Example:
-  worktree ports feature-user-auth
-  worktree ports feature-reports`,
-	Args: cobra.ExactArgs(1),
+If no feature name is provided and you're in a worktree directory,
+the feature will be auto-detected from .worktree-instance.
+
+Examples:
+  worktree ports feature-user-auth    # Explicit feature name
+  worktree ports                      # Auto-detect from current directory`,
+	Args: cobra.MaximumNArgs(1),
 	Run:  runPorts,
 }
 
 func runPorts(cmd *cobra.Command, args []string) {
-	featureName := args[0]
+	var featureName string
+	autoDetected := false
+
+	// Auto-detect feature name if not provided
+	if len(args) == 0 {
+		instance, err := config.DetectInstance()
+		if err != nil {
+			ui.Error("Not in a worktree directory and no feature name provided")
+			ui.Info("Usage: worktree ports <feature-name>")
+			ui.Info("   or: cd to a worktree directory and run: worktree ports")
+			os.Exit(1)
+		}
+		featureName = instance.Feature
+		autoDetected = true
+	} else {
+		featureName = args[0]
+	}
 
 	// Get configuration
 	cfg, err := config.New()
@@ -59,6 +78,9 @@ func runPorts(cmd *cobra.Command, args []string) {
 
 	// Display header
 	ui.PrintHeader(fmt.Sprintf("Ports for Feature: %s", featureName))
+	if autoDetected {
+		ui.Info("✨ Auto-detected from current directory")
+	}
 	ui.NewLine()
 
 	// Show ports from registry dynamically

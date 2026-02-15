@@ -72,6 +72,12 @@ func runYolo(cmd *cobra.Command, args []string) {
 		checkError(fmt.Errorf("failed to save registry: %w", err))
 	}
 
+	// Update instance marker file
+	featureDir := cfg.WorktreeFeaturePath(featureName)
+	if err := config.UpdateInstanceYoloMode(featureDir, newState); err != nil {
+		ui.Warning(fmt.Sprintf("Failed to update instance marker: %v", err))
+	}
+
 	// Display result
 	ui.NewLine()
 	if newState {

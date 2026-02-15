@@ -54,6 +54,58 @@ Port values support dynamic calculation using `{instance}` placeholder:
 **Instance Calculation**:
 Instance number is derived from allocated APP_PORT: `instance = APP_PORT - basePort`
 
+### Instance Detection System
+
+**Location**: `pkg/config/instance.go`
+
+The instance detection system allows commands to auto-detect which worktree instance they're running in, enabling context-aware operation from any directory within a worktree.
+
+**How It Works**:
+1. When creating a worktree, a `.worktree-instance` marker file is written to the feature root directory
+2. Commands can call `DetectInstance()` to walk up from the current directory and find the marker
+3. If found, commands automatically know which feature/instance they're operating on
+
+**Instance Marker File** (`worktrees/feature-name/.worktree-instance`):
+```json
+{
+  "feature": "feature-outlook",
+  "instance": 2,
+  "project_root": "/Users/braunmar/Sites/skillsetup",
+  "worktree_root": "/Users/braunmar/Sites/skillsetup/worktrees/feature-outlook",
+  "projects": ["backend", "frontend"],
+  "ports": {"APP_PORT": 8082, "FE_PORT": 3002, ...},
+  "yolo_mode": true,
+  "created_at": "2026-02-15T10:30:00Z"
+}
+```
+
+**Key Functions**:
+- `DetectInstance()` - Walks up from CWD to find `.worktree-instance`, returns InstanceContext
+- `WriteInstanceMarker()` - Creates `.worktree-instance` file (called by `new-feature` command)
+- `UpdateInstanceYoloMode()` - Updates yolo_mode field (called by `yolo` command)
+- `RemoveInstanceMarker()` - Deletes `.worktree-instance` file (called by `remove` command)
+
+**Commands Supporting Auto-Detection**:
+All these commands accept an optional feature name argument. If omitted, they auto-detect:
+- `worktree status` - Shows status for current instance
+- `worktree ports` - Shows ports for current instance
+- `worktree start` - Starts services for current instance
+- `worktree stop` - Stops services for current instance
+
+**Example Usage**:
+```bash
+# From project root - explicit feature name required
+worktree status feature-outlook
+
+# From feature root - auto-detects
+cd worktrees/feature-outlook
+worktree status                  # ✨ Auto-detected: feature-outlook
+
+# From project subdirectory - auto-detects
+cd worktrees/feature-outlook/backend
+worktree ports                   # ✨ Auto-detected: feature-outlook
+```
+
 ### Command Structure
 
 **Location**: `cmd/*.go`
@@ -89,6 +141,8 @@ func init() {
 **`pkg/config/`**
 - `config.go` - Project root discovery, paths
 - `workconfig.go` - `.worktree.yml` parsing, port calculations, env vars
+- `instance.go` - Instance detection, `.worktree-instance` marker file management (NEW)
+- `instance_test.go` - Instance detection tests (NEW)
 - `agent.go` - Scheduled agent task configuration (NEW)
 
 **`pkg/registry/`**
@@ -313,6 +367,57 @@ composeProject := workCfg.ReplaceComposeProjectPlaceholders(template, featureNam
 // "skillsetup-feature-user-auth-backend"
 ```
 
+### Instance Detection
+
+**Auto-detect feature name from current directory** (NEW):
+```go
+// In command Run functions - support optional feature name arg
+var featureName string
+autoDetected := false
+
+if len(args) == 0 {
+    // No feature name provided - try auto-detection
+    instance, err := config.DetectInstance()
+    if err != nil {
+        ui.Error("Not in a worktree directory and no feature name provided")
+        ui.Info("Usage: worktree command <feature-name>")
+        ui.Info("   or: cd to a worktree directory and run: worktree command")
+        os.Exit(1)
+    }
+    featureName = instance.Feature
+    autoDetected = true
+} else {
+    // Explicit feature name provided
+    featureName = args[0]
+}
+
+// Show auto-detection in UI
+if autoDetected {
+    ui.Info("✨ Auto-detected from current directory")
+}
+```
+
+**Writing instance markers** (in `new-feature` command):
+```go
+// After registry.Save(), write .worktree-instance marker
+err := config.WriteInstanceMarker(
+    featureDir,      // worktrees/feature-name/
+    featureName,     // "feature-name"
+    instance,        // 1, 2, 3, ...
+    cfg.ProjectRoot, // "/Users/braunmar/Sites/skillsetup"
+    projects,        // ["backend", "frontend"]
+    ports,           // map[string]int{"APP_PORT": 8081, ...}
+    yoloMode,        // true/false
+)
+```
+
+**Updating YOLO mode** (in `yolo` command):
+```go
+// After updating registry, update instance marker
+featureDir := cfg.WorktreeFeaturePath(featureName)
+err := config.UpdateInstanceYoloMode(featureDir, newYoloState)
+```
+
 ### Error Handling
 
 **Use `checkError()` for fatal errors**:
@@ -412,4 +517,5 @@ One project in the preset can be marked as `claude_working_dir: true`. This is w
 - **Port expressions are validated**: At config load time, not runtime
 - **Registry is source of truth**: Not Docker, not Git worktree list
 - **Compose project names**: Per-service to avoid conflicts
+- **Instance detection**: Commands auto-detect feature from `.worktree-instance` marker file
 - **Scheduled agents**: Still in development, expect changes

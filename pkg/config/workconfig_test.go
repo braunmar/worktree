@@ -562,7 +562,7 @@ func TestExportEnvVars(t *testing.T) {
 // TestExportEnvVars_InstanceAlwaysPresent verifies INSTANCE is always exported
 func TestExportEnvVars_InstanceAlwaysPresent(t *testing.T) {
 	configs := []*WorktreeConfig{
-		{}, // Empty config
+		{},                               // Empty config
 		{Ports: map[string]PortConfig{}}, // Empty ports
 		{Ports: map[string]PortConfig{
 			"FE_PORT": {Port: "3000", Env: "FE_PORT"},
@@ -710,7 +710,7 @@ func TestPortConfig_GetValue(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := tt.portCfg.GetValue(tt.instance)
+			got := tt.portCfg.GetValue(tt.instance, map[string]string{})
 			if got != tt.want {
 				t.Errorf("GetValue(%d) = %q, want %q", tt.instance, got, tt.want)
 			}

@@ -19,18 +19,22 @@ var (
 )
 
 var startCmd = &cobra.Command{
-	Use:   "start <feature-name>",
+	Use:   "start [feature-name]",
 	Short: "Start all services for a feature worktree",
 	Long: `Start all services for a feature worktree based on preset configuration.
 
 Starts ALL projects defined in the preset sequentially. Works with detached Docker
 services that return immediately.
 
-Example:
-  worktree start feature-user-auth                  # Start feature
+If no feature name is provided and you're in a worktree directory,
+the feature will be auto-detected from .worktree-instance.
+
+Examples:
+  worktree start feature-user-auth                  # Explicit feature name
+  worktree start                                    # Auto-detect from current directory
   worktree start feature-reports --preset backend   # Use specific preset
   worktree start feature-api --no-fixtures          # Skip post-startup tasks`,
-	Args: cobra.ExactArgs(1),
+	Args: cobra.MaximumNArgs(1),
 	Run:  runStart,
 }
 
@@ -40,8 +44,24 @@ func init() {
 }
 
 func runStart(cmd *cobra.Command, args []string) {
-	featureName := args[0]
+	var featureName string
+	autoDetected := false
 	verbose, _ := cmd.Flags().GetBool("verbose")
+
+	// Auto-detect feature name if not provided
+	if len(args) == 0 {
+		instance, err := config.DetectInstance()
+		if err != nil {
+			ui.Error("Not in a worktree directory and no feature name provided")
+			ui.Info("Usage: worktree start <feature-name>")
+			ui.Info("   or: cd to a worktree directory and run: worktree start")
+			os.Exit(1)
+		}
+		featureName = instance.Feature
+		autoDetected = true
+	} else {
+		featureName = args[0]
+	}
 
 	// Get configuration
 	cfg, err := config.New()
@@ -111,6 +131,9 @@ func runStart(cmd *cobra.Command, args []string) {
 
 	// Display header
 	ui.Rocket(fmt.Sprintf("Starting Feature: %s", featureName))
+	if autoDetected {
+		ui.Info("✨ Auto-detected from current directory")
+	}
 	ui.Info(fmt.Sprintf("Branch: %s", wt.Branch))
 	ui.NewLine()
 
