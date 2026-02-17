@@ -3,8 +3,8 @@ package cmd
 import (
 	"fmt"
 
-	"worktree/pkg/agent"
-	"worktree/pkg/config"
+	"github.com/braunmar/worktree/pkg/agent"
+	"github.com/braunmar/worktree/pkg/config"
 
 	"github.com/spf13/cobra"
 )

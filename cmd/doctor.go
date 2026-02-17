@@ -3,9 +3,9 @@ package cmd
 import (
 	"fmt"
 	"os"
-	"worktree/pkg/config"
-	"worktree/pkg/doctor"
-	"worktree/pkg/registry"
+	"github.com/braunmar/worktree/pkg/config"
+	"github.com/braunmar/worktree/pkg/doctor"
+	"github.com/braunmar/worktree/pkg/registry"
 
 	"github.com/spf13/cobra"
 )

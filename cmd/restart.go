@@ -3,7 +3,7 @@ package cmd
 import (
 	"fmt"
 
-	"worktree/pkg/ui"
+	"github.com/braunmar/worktree/pkg/ui"
 
 	"github.com/spf13/cobra"
 )

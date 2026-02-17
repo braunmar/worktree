@@ -11,7 +11,7 @@ import (
 	"syscall"
 	"time"
 
-	"worktree/pkg/config"
+	"github.com/braunmar/worktree/pkg/config"
 
 	"github.com/robfig/cron/v3"
 )

@@ -6,7 +6,7 @@ import (
 	"os/exec"
 	"strings"
 
-	"worktree/pkg/config"
+	"github.com/braunmar/worktree/pkg/config"
 )
 
 // GSDWorkflow represents a GSD workflow configuration

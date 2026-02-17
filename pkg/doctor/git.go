@@ -6,9 +6,9 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
-	"worktree/pkg/config"
-	"worktree/pkg/git"
-	"worktree/pkg/registry"
+	"github.com/braunmar/worktree/pkg/config"
+	"github.com/braunmar/worktree/pkg/git"
+	"github.com/braunmar/worktree/pkg/registry"
 )
 
 // CheckGitStatus checks git status for a worktree

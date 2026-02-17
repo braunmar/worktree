@@ -2,7 +2,7 @@ package ui
 
 import (
 	"fmt"
-	"worktree/pkg/config"
+	"github.com/braunmar/worktree/pkg/config"
 
 	"github.com/fatih/color"
 )

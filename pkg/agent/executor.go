@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"worktree/pkg/config"
+	"github.com/braunmar/worktree/pkg/config"
 )
 
 // Executor manages the execution of a scheduled agent task

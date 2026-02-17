@@ -7,8 +7,8 @@ import (
 	"runtime"
 	"strings"
 
-	"worktree/pkg/config"
-	"worktree/pkg/ui"
+	"github.com/braunmar/worktree/pkg/config"
+	"github.com/braunmar/worktree/pkg/ui"
 
 	"github.com/spf13/cobra"
 )

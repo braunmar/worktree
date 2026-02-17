@@ -10,7 +10,7 @@ import (
 	"strings"
 	"sync"
 	"time"
-	"worktree/pkg/config"
+	"github.com/braunmar/worktree/pkg/config"
 )
 
 const (

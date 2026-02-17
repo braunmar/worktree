@@ -6,10 +6,10 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"worktree/pkg/agent"
-	"worktree/pkg/config"
-	"worktree/pkg/queue"
-	"worktree/pkg/ui"
+	"github.com/braunmar/worktree/pkg/agent"
+	"github.com/braunmar/worktree/pkg/config"
+	"github.com/braunmar/worktree/pkg/queue"
+	"github.com/braunmar/worktree/pkg/ui"
 )
 
 var (

@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"os"
 
-	"worktree/pkg/config"
-	"worktree/pkg/registry"
-	"worktree/pkg/ui"
+	"github.com/braunmar/worktree/pkg/config"
+	"github.com/braunmar/worktree/pkg/registry"
+	"github.com/braunmar/worktree/pkg/ui"
 
 	"github.com/spf13/cobra"
 )

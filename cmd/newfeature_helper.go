@@ -1,6 +1,6 @@
 package cmd
 
-import "worktree/pkg/config"
+import "github.com/braunmar/worktree/pkg/config"
 
 // getClaudeWorkingProject returns the project configured as Claude's working directory
 // from the given preset projects (not all projects in config)

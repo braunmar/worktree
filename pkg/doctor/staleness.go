@@ -6,9 +6,9 @@ import (
 	"os/exec"
 	"strings"
 	"time"
-	"worktree/pkg/config"
-	"worktree/pkg/docker"
-	"worktree/pkg/registry"
+	"github.com/braunmar/worktree/pkg/config"
+	"github.com/braunmar/worktree/pkg/docker"
+	"github.com/braunmar/worktree/pkg/registry"
 )
 
 // CheckStaleness checks if a worktree is stale based on multiple criteria

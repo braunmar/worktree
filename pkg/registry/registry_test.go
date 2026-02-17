@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"worktree/pkg/config"
+	"github.com/braunmar/worktree/pkg/config"
 )
 
 // testConfig creates a WorktreeConfig with standard port ranges for testing

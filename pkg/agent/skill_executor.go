@@ -5,7 +5,7 @@ import (
 	"os"
 	"os/exec"
 
-	"worktree/pkg/config"
+	"github.com/braunmar/worktree/pkg/config"
 )
 
 // executeSkillStep executes a Claude Code skill command

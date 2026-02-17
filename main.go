@@ -2,7 +2,7 @@ package main
 
 import (
 	"os"
-	"worktree/cmd"
+	"github.com/braunmar/worktree/cmd"
 )
 
 func main() {

@@ -2,9 +2,9 @@ package doctor
 
 import (
 	"os"
-	"worktree/pkg/config"
-	"worktree/pkg/docker"
-	"worktree/pkg/registry"
+	"github.com/braunmar/worktree/pkg/config"
+	"github.com/braunmar/worktree/pkg/docker"
+	"github.com/braunmar/worktree/pkg/registry"
 )
 
 // CheckConsistency checks for mismatches between registry, directories, and containers

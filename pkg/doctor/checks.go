@@ -1,9 +1,9 @@
 package doctor
 
 import (
-	"worktree/pkg/config"
-	"worktree/pkg/docker"
-	"worktree/pkg/registry"
+	"github.com/braunmar/worktree/pkg/config"
+	"github.com/braunmar/worktree/pkg/docker"
+	"github.com/braunmar/worktree/pkg/registry"
 )
 
 // RunHealthCheck runs all diagnostic checks and returns a comprehensive report

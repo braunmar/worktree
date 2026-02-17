@@ -6,9 +6,9 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"worktree/pkg/config"
-	"worktree/pkg/history"
-	"worktree/pkg/ui"
+	"github.com/braunmar/worktree/pkg/config"
+	"github.com/braunmar/worktree/pkg/history"
+	"github.com/braunmar/worktree/pkg/ui"
 )
 
 var (

@@ -2,7 +2,7 @@ package doctor
 
 import (
 	"time"
-	"worktree/pkg/registry"
+	"github.com/braunmar/worktree/pkg/registry"
 )
 
 // Options for running health checks

@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"time"
 
-	"worktree/pkg/config"
-	"worktree/pkg/queue"
+	"github.com/braunmar/worktree/pkg/config"
+	"github.com/braunmar/worktree/pkg/queue"
 )
 
 // ProcessQueue runs the next pending task from the queue

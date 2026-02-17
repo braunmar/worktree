@@ -23,7 +23,7 @@ Worktree Manager is a CLI tool that helps teams work on multiple features in par
 ### From Source
 
 ```bash
-git clone https://github.com/yourusername/worktree-manager
+git clone https://github.com/braunmar/worktree
 cd worktree-manager
 make build
 ```
@@ -32,7 +32,7 @@ Binary is created at `scripts/worktree`.
 
 ### Pre-built Binaries
 
-Download from [Releases](https://github.com/yourusername/worktree-manager/releases).
+Download from [Releases](https://github.com/braunmar/worktree/releases).
 
 ---
 
@@ -336,8 +336,8 @@ MIT License - See [LICENSE](LICENSE)
 
 ## Support
 
-- **Issues**: [GitHub Issues](https://github.com/yourusername/worktree-manager/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/yourusername/worktree-manager/discussions)
+- **Issues**: [GitHub Issues](https://github.com/braunmar/worktree/issues)
+- **Discussions**: [GitHub Discussions](https://github.com/braunmar/worktree/discussions)
 - **Docs**: [Full Documentation](https://worktree-manager.dev)
 
 ---

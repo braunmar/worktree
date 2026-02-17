@@ -7,8 +7,8 @@ import (
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 
-	"worktree/pkg/config"
-	"worktree/pkg/ui"
+	"github.com/braunmar/worktree/pkg/config"
+	"github.com/braunmar/worktree/pkg/ui"
 )
 
 // BatchTasksFile represents the structure of the batch tasks YAML file

@@ -1,4 +1,4 @@
-module worktree
+module github.com/braunmar/worktree
 
 go 1.25.4
 

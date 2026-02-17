@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
-	"worktree/pkg/ui"
+	"github.com/braunmar/worktree/pkg/ui"
 )
 
 // Print outputs the report in human-readable format
