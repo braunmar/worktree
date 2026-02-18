@@ -1407,6 +1407,255 @@ func TestGenerateFiles(t *testing.T) {
 	})
 }
 
+// oauthConfig returns a WorktreeConfig that mirrors the real OAuth redirect URI setup
+// in .worktree.yml: FE_PORT is a static expression "3000" (allocated from range),
+// and the OAuth vars use {FE_PORT} in their value template.
+func oauthConfig() *WorktreeConfig {
+	feRange := [2]int{3000, 3100}
+	beRange := [2]int{8080, 8180}
+	return &WorktreeConfig{
+		EnvVariables: map[string]EnvVarConfig{
+			"FE_PORT": {
+				Port:  "3000",
+				Env:   "FE_PORT",
+				Range: &feRange,
+			},
+			"BE_PORT": {
+				Port:  "8080",
+				Env:   "BE_PORT",
+				Range: &beRange,
+			},
+			"GOOGLE_OAUTH_REDIRECT_URI": {
+				Value: "http://localhost:{FE_PORT}/oauth/callback/google",
+				Env:   "GOOGLE_OAUTH_REDIRECT_URI",
+			},
+			"OUTLOOK_OAUTH_REDIRECT_URI": {
+				Value: "http://localhost:{FE_PORT}/oauth/callback/outlook",
+				Env:   "OUTLOOK_OAUTH_REDIRECT_URI",
+			},
+			"REACT_APP_API_BASE_URL": {
+				Value: "http://localhost:{BE_PORT}",
+				Env:   "REACT_APP_API_BASE_URL",
+			},
+		},
+	}
+}
+
+// TestResolveValueVars_PropagatesAllocatedPorts is the regression test for the bug:
+// ExportEnvVars computes value templates against base port expressions (e.g. FE_PORT=3000)
+// before the actual allocated port (e.g. 3002) is applied. ResolveValueVars must update
+// the value vars to use the real ports.
+func TestResolveValueVars_PropagatesAllocatedPorts(t *testing.T) {
+	cfg := oauthConfig()
+
+	// Simulate what start.go / newfeature.go do:
+	// 1. ExportEnvVars computes base values (FE_PORT=3000 from expression "3000")
+	envVars := cfg.ExportEnvVars(2) // instance 2
+
+	// 2. After ExportEnvVars, FE_PORT is 3000 (the base expression value).
+	//    The OAuth vars are already set to ...localhost:3000...
+	if envVars["GOOGLE_OAUTH_REDIRECT_URI"] != "http://localhost:3000/oauth/callback/google" {
+		t.Fatalf("precondition: expected base port 3000 before override, got %q", envVars["GOOGLE_OAUTH_REDIRECT_URI"])
+	}
+
+	// 3. Override with the actually allocated port from the registry (e.g. 3002)
+	envVars["FE_PORT"] = "3002"
+	envVars["BE_PORT"] = "8082"
+
+	// 4. Without ResolveValueVars, OAuth URIs still reference :3000 — the bug.
+	//    ResolveValueVars must fix them.
+	cfg.ResolveValueVars(2, envVars)
+
+	tests := []struct {
+		key  string
+		want string
+	}{
+		{"GOOGLE_OAUTH_REDIRECT_URI", "http://localhost:3002/oauth/callback/google"},
+		{"OUTLOOK_OAUTH_REDIRECT_URI", "http://localhost:3002/oauth/callback/outlook"},
+		{"REACT_APP_API_BASE_URL", "http://localhost:8082"},
+	}
+	for _, tt := range tests {
+		if got := envVars[tt.key]; got != tt.want {
+			t.Errorf("ResolveValueVars: %s = %q, want %q", tt.key, got, tt.want)
+		}
+	}
+}
+
+// TestResolveValueVars_BasePortWhenNoOverride verifies that calling ResolveValueVars
+// without any port override does not change existing correct values.
+func TestResolveValueVars_BasePortWhenNoOverride(t *testing.T) {
+	cfg := oauthConfig()
+	envVars := cfg.ExportEnvVars(0)
+
+	// No override — ports stay at base (3000 / 8080)
+	cfg.ResolveValueVars(0, envVars)
+
+	if got := envVars["GOOGLE_OAUTH_REDIRECT_URI"]; got != "http://localhost:3000/oauth/callback/google" {
+		t.Errorf("GOOGLE_OAUTH_REDIRECT_URI = %q, want localhost:3000", got)
+	}
+	if got := envVars["REACT_APP_API_BASE_URL"]; got != "http://localhost:8080" {
+		t.Errorf("REACT_APP_API_BASE_URL = %q, want localhost:8080", got)
+	}
+}
+
+// TestResolveValueVars_MultipleInstances verifies different allocated ports
+// produce different URI values.
+func TestResolveValueVars_MultipleInstances(t *testing.T) {
+	cfg := oauthConfig()
+
+	cases := []struct {
+		allocatedFE int
+		want        string
+	}{
+		{3000, "http://localhost:3000/oauth/callback/google"},
+		{3001, "http://localhost:3001/oauth/callback/google"},
+		{3007, "http://localhost:3007/oauth/callback/google"},
+	}
+
+	for _, tc := range cases {
+		envVars := cfg.ExportEnvVars(0)
+		envVars["FE_PORT"] = fmt.Sprintf("%d", tc.allocatedFE)
+		cfg.ResolveValueVars(0, envVars)
+
+		got := envVars["GOOGLE_OAUTH_REDIRECT_URI"]
+		if got != tc.want {
+			t.Errorf("allocated FE_PORT=%d: GOOGLE_OAUTH_REDIRECT_URI = %q, want %q",
+				tc.allocatedFE, got, tc.want)
+		}
+	}
+}
+
+// TestResolveValueVars_OnlyValueVarsUpdated verifies that ResolveValueVars does not
+// alter port-based env vars — it must only touch Value-template entries.
+func TestResolveValueVars_OnlyValueVarsUpdated(t *testing.T) {
+	cfg := oauthConfig()
+	envVars := cfg.ExportEnvVars(1)
+	envVars["FE_PORT"] = "3005" // simulate registry override
+
+	cfg.ResolveValueVars(1, envVars)
+
+	// Port var itself must not be changed by ResolveValueVars
+	if got := envVars["FE_PORT"]; got != "3005" {
+		t.Errorf("FE_PORT must stay %q after ResolveValueVars, got %q", "3005", got)
+	}
+}
+
+// TestResolveValueVars_EmptyConfig is a no-op safety check.
+func TestResolveValueVars_EmptyConfig(t *testing.T) {
+	cfg := &WorktreeConfig{}
+	envVars := map[string]string{"FE_PORT": "3001"}
+	cfg.ResolveValueVars(0, envVars) // must not panic
+	if envVars["FE_PORT"] != "3001" {
+		t.Errorf("FE_PORT changed unexpectedly")
+	}
+}
+
+// TestGetComputedVars_IncludesPortVarsAndValueVars verifies that GetComputedVars returns
+// both port-based vars (FE_PORT, BE_PORT) and value-template vars (OAuth URIs, API URLs).
+func TestGetComputedVars_IncludesPortVarsAndValueVars(t *testing.T) {
+	cfg := oauthConfig()
+	envVars := cfg.ExportEnvVars(0)
+	envVars["FE_PORT"] = "3003"
+	envVars["BE_PORT"] = "8083"
+	cfg.ResolveValueVars(0, envVars)
+
+	computed := cfg.GetComputedVars(envVars)
+
+	// Port vars MUST now appear
+	if got := computed["FE_PORT"]; got != "3003" {
+		t.Errorf("GetComputedVars[FE_PORT] = %q, want %q", got, "3003")
+	}
+	if got := computed["BE_PORT"]; got != "8083" {
+		t.Errorf("GetComputedVars[BE_PORT] = %q, want %q", got, "8083")
+	}
+
+	// Value-template vars must also appear with resolved values
+	want := map[string]string{
+		"FE_PORT":                    "3003",
+		"BE_PORT":                    "8083",
+		"GOOGLE_OAUTH_REDIRECT_URI":  "http://localhost:3003/oauth/callback/google",
+		"OUTLOOK_OAUTH_REDIRECT_URI": "http://localhost:3003/oauth/callback/outlook",
+		"REACT_APP_API_BASE_URL":     "http://localhost:8083",
+	}
+	for k, wantVal := range want {
+		if got := computed[k]; got != wantVal {
+			t.Errorf("GetComputedVars[%q] = %q, want %q", k, got, wantVal)
+		}
+	}
+	if len(computed) != len(want) {
+		t.Errorf("GetComputedVars returned %d entries, want %d: %v", len(computed), len(want), computed)
+	}
+}
+
+// TestGetComputedVars_ExcludesUnresolvedTemplates verifies that entries whose resolved
+// value still contains '{' (e.g. COMPOSE_PROJECT_NAME with {project}/{feature}/{service})
+// are excluded — they cannot be substituted by the normal env-var resolution flow.
+func TestGetComputedVars_ExcludesUnresolvedTemplates(t *testing.T) {
+	r := [2]int{3000, 3100}
+	cfg := &WorktreeConfig{
+		EnvVariables: map[string]EnvVarConfig{
+			"FE_PORT": {Port: "3000", Env: "FE_PORT", Range: &r},
+			"COMPOSE_PROJECT_NAME": {
+				Value: "{project}-{feature}-{service}",
+				Env:   "COMPOSE_PROJECT_NAME",
+			},
+		},
+	}
+	envVars := cfg.ExportEnvVars(0)
+	// After ExportEnvVars, COMPOSE_PROJECT_NAME = "{project}-{feature}-{service}" (unresolved)
+
+	computed := cfg.GetComputedVars(envVars)
+
+	if _, ok := computed["COMPOSE_PROJECT_NAME"]; ok {
+		t.Errorf("GetComputedVars must exclude COMPOSE_PROJECT_NAME with unresolved template, got %v", computed)
+	}
+	// FE_PORT should still be present
+	if _, ok := computed["FE_PORT"]; !ok {
+		t.Error("GetComputedVars must include FE_PORT")
+	}
+}
+
+// TestGetComputedVars_PortOnlyConfigIncludesPorts verifies that a port-only config
+// (no Value templates) returns the port vars in computed_vars.
+func TestGetComputedVars_PortOnlyConfigIncludesPorts(t *testing.T) {
+	cfg := &WorktreeConfig{
+		EnvVariables: map[string]EnvVarConfig{
+			"FE_PORT": {Port: "3000", Env: "FE_PORT"},
+			"BE_PORT": {Port: "8080", Env: "BE_PORT"},
+		},
+	}
+	envVars := cfg.ExportEnvVars(0)
+	envVars["FE_PORT"] = "3002"
+	envVars["BE_PORT"] = "8082"
+
+	computed := cfg.GetComputedVars(envVars)
+
+	if got := computed["FE_PORT"]; got != "3002" {
+		t.Errorf("computed[FE_PORT] = %q, want %q", got, "3002")
+	}
+	if got := computed["BE_PORT"]; got != "8082" {
+		t.Errorf("computed[BE_PORT] = %q, want %q", got, "8082")
+	}
+	if len(computed) != 2 {
+		t.Errorf("expected 2 entries, got %d: %v", len(computed), computed)
+	}
+}
+
+// TestGetComputedVars_MissingEnvVarSkipped verifies that a Value-template entry
+// whose env var is not yet in the envVars map is silently skipped.
+func TestGetComputedVars_MissingEnvVarSkipped(t *testing.T) {
+	cfg := &WorktreeConfig{
+		EnvVariables: map[string]EnvVarConfig{
+			"MY_URL": {Value: "http://example.com", Env: "MY_URL"},
+		},
+	}
+	// envVars does not contain MY_URL
+	computed := cfg.GetComputedVars(map[string]string{})
+	if len(computed) != 0 {
+		t.Errorf("GetComputedVars with missing var = %v, want empty", computed)
+	}
+}
+
 // TestValidate_PortRangeAndDefaultPreset tests the remaining Validate branches
 func TestValidate_PortRangeAndDefaultPreset(t *testing.T) {
 	validBase := func() *WorktreeConfig {

@@ -287,6 +287,17 @@ func runNewFeature(cmd *cobra.Command, args []string) {
 		baseEnvVars[service] = fmt.Sprintf("%d", port)
 	}
 
+	// Recompute value-template vars (e.g., GOOGLE_OAUTH_REDIRECT_URI) now that actual
+	// allocated ports are in baseEnvVars. Without this, they resolve against base port
+	// expressions (always 3000, 8080, etc.) instead of the real allocated ports.
+	workCfg.ResolveValueVars(instance, baseEnvVars)
+
+	// Persist computed vars to registry for visibility in `worktree list`
+	wt.ComputedVars = workCfg.GetComputedVars(baseEnvVars)
+	if err := reg.Save(); err != nil {
+		ui.Warning(fmt.Sprintf("Failed to update registry computed vars: %v", err))
+	}
+
 	// Generate configured files for each project (e.g., .env.development.local)
 	for _, projectName := range presetCfg.Projects {
 		if err := workCfg.GenerateFiles(projectName, featureDir, baseEnvVars); err != nil {

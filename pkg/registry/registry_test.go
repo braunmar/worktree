@@ -468,3 +468,147 @@ func TestFindAvailablePort_Exhausted(t *testing.T) {
 		t.Error("expected error when all ports in range are already allocated in registry")
 	}
 }
+
+// TestComputedVars_PersistsAcrossSaveLoad verifies that ComputedVars round-trips
+// through JSON serialisation correctly.
+func TestComputedVars_PersistsAcrossSaveLoad(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "registry-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	reg, err := Load(tempDir, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	wt := &Worktree{
+		Branch:     "feature/oauth",
+		Normalized: "feature-oauth",
+		Created:    time.Now(),
+		Projects:   []string{"backend", "frontend"},
+		Ports:      map[string]int{"FE_PORT": 3002, "BE_PORT": 8082},
+		ComputedVars: map[string]string{
+			"GOOGLE_OAUTH_REDIRECT_URI":  "http://localhost:3002/oauth/callback/google",
+			"OUTLOOK_OAUTH_REDIRECT_URI": "http://localhost:3002/oauth/callback/outlook",
+			"REACT_APP_API_BASE_URL":     "http://localhost:8082",
+		},
+	}
+
+	if err := reg.Add(wt); err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+	if err := reg.Save(); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	reg2, err := Load(tempDir, nil)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	loaded, exists := reg2.Get("feature-oauth")
+	if !exists {
+		t.Fatal("worktree not found after reload")
+	}
+
+	want := map[string]string{
+		"GOOGLE_OAUTH_REDIRECT_URI":  "http://localhost:3002/oauth/callback/google",
+		"OUTLOOK_OAUTH_REDIRECT_URI": "http://localhost:3002/oauth/callback/outlook",
+		"REACT_APP_API_BASE_URL":     "http://localhost:8082",
+	}
+	for k, wantVal := range want {
+		if got := loaded.ComputedVars[k]; got != wantVal {
+			t.Errorf("ComputedVars[%q] = %q, want %q", k, got, wantVal)
+		}
+	}
+	if len(loaded.ComputedVars) != len(want) {
+		t.Errorf("ComputedVars has %d entries, want %d: %v", len(loaded.ComputedVars), len(want), loaded.ComputedVars)
+	}
+}
+
+// TestComputedVars_NilWhenNotSet verifies that a worktree without ComputedVars
+// (legacy registry entries) deserialises without error and has a nil map.
+func TestComputedVars_NilWhenNotSet(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "registry-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	reg, err := Load(tempDir, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	wt := &Worktree{
+		Branch:     "feature/legacy",
+		Normalized: "feature-legacy",
+		Created:    time.Now(),
+		Ports:      map[string]int{"FE_PORT": 3000},
+		// ComputedVars intentionally omitted (legacy entry)
+	}
+	reg.Add(wt)
+	reg.Save()
+
+	reg2, err := Load(tempDir, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	loaded, _ := reg2.Get("feature-legacy")
+	if loaded.ComputedVars != nil && len(loaded.ComputedVars) != 0 {
+		t.Errorf("expected nil/empty ComputedVars for legacy entry, got %v", loaded.ComputedVars)
+	}
+}
+
+// TestComputedVars_UpdatedAfterPortChange simulates what start.go does:
+// it overwrites ComputedVars when the worktree is restarted and saves the registry,
+// so the new computed values are visible on the next `worktree list`.
+func TestComputedVars_UpdatedAfterPortChange(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "registry-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	reg, err := Load(tempDir, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Initial worktree with stale computed vars (port 3000 — the bug state)
+	wt := &Worktree{
+		Branch:     "feature/update",
+		Normalized: "feature-update",
+		Created:    time.Now(),
+		Ports:      map[string]int{"FE_PORT": 3001},
+		ComputedVars: map[string]string{
+			"GOOGLE_OAUTH_REDIRECT_URI": "http://localhost:3000/oauth/callback/google", // stale
+		},
+	}
+	reg.Add(wt)
+	reg.Save()
+
+	// Simulate start.go: reload registry, update ComputedVars with corrected values, save
+	reg2, err := Load(tempDir, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	loaded, _ := reg2.Get("feature-update")
+	loaded.ComputedVars = map[string]string{
+		"GOOGLE_OAUTH_REDIRECT_URI": "http://localhost:3001/oauth/callback/google", // fixed
+	}
+	reg2.Save()
+
+	// Verify the fix was persisted
+	reg3, err := Load(tempDir, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	final, _ := reg3.Get("feature-update")
+	want := "http://localhost:3001/oauth/callback/google"
+	if got := final.ComputedVars["GOOGLE_OAUTH_REDIRECT_URI"]; got != want {
+		t.Errorf("after update: GOOGLE_OAUTH_REDIRECT_URI = %q, want %q", got, want)
+	}
+}

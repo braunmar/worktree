@@ -564,6 +564,43 @@ func CalculateRelativePath(worktreeDepth int) string {
 	return result
 }
 
+// ResolveValueVars recomputes value-template env vars (e.g., GOOGLE_OAUTH_REDIRECT_URI)
+// using the provided envVars map. Call this AFTER overriding ports from the registry
+// so that placeholder substitution uses the actual allocated port values, not base values.
+func (c *WorktreeConfig) ResolveValueVars(instance int, envVars map[string]string) {
+	for _, portCfg := range c.EnvVariables {
+		if portCfg.Env != "" && portCfg.Value != "" {
+			value := portCfg.GetValue(instance, envVars)
+			if value != "" {
+				envVars[portCfg.Env] = value
+			}
+		}
+	}
+}
+
+// GetComputedVars returns all declared env vars (both port-based and value-template)
+// that are fully resolved in the provided envVars map. Entries with unresolved
+// {placeholder} tokens — such as COMPOSE_PROJECT_NAME which uses {project}/{feature}/{service}
+// that are substituted separately — are excluded automatically.
+func (c *WorktreeConfig) GetComputedVars(envVars map[string]string) map[string]string {
+	result := make(map[string]string)
+	for _, portCfg := range c.EnvVariables {
+		if portCfg.Env == "" {
+			continue
+		}
+		val, ok := envVars[portCfg.Env]
+		if !ok {
+			continue
+		}
+		// Skip values that still contain unresolved placeholders like {project}, {feature}, {service}
+		if strings.Contains(val, "{") {
+			continue
+		}
+		result[portCfg.Env] = val
+	}
+	return result
+}
+
 // GetPortServiceNames returns list of all service names that need port allocation
 // Services must have both 'env' and 'range' fields to be included
 // This excludes template-only services like COMPOSE_PROJECT_NAME

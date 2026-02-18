@@ -135,20 +135,28 @@ func runList(cmd *cobra.Command, args []string) {
 			fmt.Printf("  Status:   ⚪ Stopped\n")
 		}
 
-		// Ports from registry
-		if len(wt.Ports) > 0 {
-			fmt.Print("  Ports:    ")
-			portStrs := []string{}
+		// All exported env vars: prefer computed_vars (ports + derived values, fully resolved).
+		// Fall back to the raw ports map for legacy entries that predate computed_vars.
+		if len(wt.ComputedVars) > 0 {
+			varKeys := make([]string, 0, len(wt.ComputedVars))
+			for k := range wt.ComputedVars {
+				varKeys = append(varKeys, k)
+			}
+			sort.Strings(varKeys)
 
-			// Show main ports first
+			fmt.Printf("  Vars:     %s=%s\n", varKeys[0], wt.ComputedVars[varKeys[0]])
+			for i := 1; i < len(varKeys); i++ {
+				fmt.Printf("            %s=%s\n", varKeys[i], wt.ComputedVars[varKeys[i]])
+			}
+		} else if len(wt.Ports) > 0 {
+			// Legacy fallback: show raw port allocations
+			portStrs := []string{}
 			mainPorts := []string{"FE_PORT", "BE_PORT", "POSTGRES_PORT"}
 			for _, key := range mainPorts {
 				if port, ok := wt.Ports[key]; ok {
 					portStrs = append(portStrs, fmt.Sprintf("%s=%d", key, port))
 				}
 			}
-
-			// Show other ports
 			for key, port := range wt.Ports {
 				isMain := false
 				for _, mainKey := range mainPorts {
@@ -161,9 +169,8 @@ func runList(cmd *cobra.Command, args []string) {
 					portStrs = append(portStrs, fmt.Sprintf("%s=%d", key, port))
 				}
 			}
-
 			if len(portStrs) > 0 {
-				fmt.Printf("%s\n", portStrs[0])
+				fmt.Printf("  Ports:    %s\n", portStrs[0])
 				for i := 1; i < len(portStrs) && i < 3; i++ {
 					fmt.Printf("            %s\n", portStrs[i])
 				}

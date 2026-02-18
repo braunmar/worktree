@@ -24,6 +24,7 @@ type Worktree struct {
 	Created         time.Time         `json:"created"`
 	Projects        []string          `json:"projects"`
 	Ports           map[string]int    `json:"ports"`
+	ComputedVars    map[string]string `json:"computed_vars,omitempty"`    // Derived env vars (OAuth URIs, API URLs) resolved against actual ports
 	ComposeProject  string            `json:"compose_project,omitempty"`  // Deprecated: use ComposeProjects
 	ComposeProjects map[string]string `json:"compose_projects,omitempty"` // Per-service compose project names
 	YoloMode        bool              `json:"yolo_mode,omitempty"`        // YOLO mode: Claude works autonomously when solution is clear
