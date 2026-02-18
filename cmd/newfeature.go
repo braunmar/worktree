@@ -121,7 +121,7 @@ func runNewFeature(cmd *cobra.Command, args []string) {
 	}
 
 	// Calculate INSTANCE from allocated APP_PORT (base port is 8080)
-	appPortCfg := workCfg.Ports["APP_PORT"]
+	appPortCfg := workCfg.EnvVariables["APP_PORT"]
 	basePort, err := config.ExtractBasePort(appPortCfg.Port)
 	checkError(err)
 	instance := ports["APP_PORT"] - basePort
@@ -369,14 +369,14 @@ func runNewFeature(cmd *cobra.Command, args []string) {
 		for _, projectName := range presetCfg.Projects {
 			project := workCfg.Projects[projectName]
 
-			if project.PostCommand == "" {
+			if project.StartPostCommand == "" {
 				continue
 			}
 
 			ui.Loading(fmt.Sprintf("Running %s post-command...", projectName))
 
 			worktreePath := featureDir + "/" + project.Dir
-			postCmd := project.PostCommand
+			postCmd := project.StartPostCommand
 
 			// Build environment list with per-service COMPOSE_PROJECT_NAME
 			envList := os.Environ()
@@ -504,8 +504,8 @@ func displayDryRunPreview(featureName string, instance int, ports map[string]int
 		fmt.Println("Post-startup commands:")
 		for _, projectName := range presetCfg.Projects {
 			project := workCfg.Projects[projectName]
-			if project.PostCommand != "" {
-				ui.CheckMark(fmt.Sprintf("%s: %s", projectName, project.PostCommand))
+			if project.StartPostCommand != "" {
+				ui.CheckMark(fmt.Sprintf("%s: %s", projectName, project.StartPostCommand))
 			}
 		}
 		ui.NewLine()

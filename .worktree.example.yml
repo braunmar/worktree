@@ -13,35 +13,72 @@ project_name: "myproject"
 hostname: localhost
 
 # Project definitions
+#
+# EXECUTOR TYPES:
+#
+#   executor: docker    (default)
+#     Runs start_command synchronously (expects the command to return quickly,
+#     e.g. "docker compose up -d"). Stop uses Docker compose down.
+#
+#   executor: process
+#     Runs start_command as a background process and saves its PID to
+#     <feature-dir>/<project>.pid. Stop sends SIGTERM to the process group
+#     (SIGKILL after 5 s if needed) and removes the PID file.
+#     Use this for npm, go run, python, etc.
+#
+# Lifecycle hooks (all optional):
+#   start_pre_command    — runs before start_command
+#   start_command        — main command to start the service
+#   start_post_command   — runs after start_command (migrations, seed data, etc.)
+#   stop_pre_command     — runs before services are stopped (drain, flush, backup)
+#   stop_post_command    — runs after services are stopped (cleanup, verify)
+#   restart_pre_command  — runs before the full restart cycle (before stop)
+#   restart_post_command — runs after the full restart cycle (after start+post)
+#
+# Hook failures are non-fatal (warnings). start_command failure IS fatal.
+# Hooks triggered by command:
+#   worktree start   → start_pre → start → start_post
+#   worktree stop    → stop_pre  → [stop by executor] → stop_post
+#   worktree restart → restart_pre → (stop cycle) → (start cycle) → restart_post
+#
 projects:
-  # Example: Backend service
+  # Example: Backend service (Docker executor — default)
   backend:
-    dir: backend                              # Directory relative to project root
-    main_branch: main                         # Main branch name
-    start_command: "docker-compose up -d"     # Start services (env vars set by worktree manager)
-    post_command: "npm run seed"              # Run after start (fixtures, seed data, migrations)
-    claude_working_dir: true                  # Set as Claude's working directory
+    executor: docker                               # Optional: "docker" is the default
+    dir: backend                                   # Directory relative to project root
+    main_branch: main                              # Main branch name
+    start_pre_command: "make check-deps"           # Optional: verify dependencies before start
+    start_command: "docker-compose up -d"          # Start services
+    start_post_command: "make migrate && make seed" # Run after start (fixtures, migrations)
+    stop_pre_command: "make drain-connections"     # Optional: graceful drain before stop
+    stop_post_command: ""                          # Optional: cleanup after stop
+    restart_pre_command: "make backup-state"       # Optional: runs before stop during restart
+    restart_post_command: "make verify-health"     # Optional: runs after start during restart
+    claude_working_dir: true                       # Set as Claude's working directory
 
-  # Example: Frontend app
+  # Example: Frontend app (process executor — no Docker needed)
   frontend:
+    executor: process                              # Start as background process, stop via PID
     dir: frontend
     main_branch: main
-    start_command: "npm start"                # Env vars like PORT set from registry
-    # No post_command needed for this project
+    start_command: "npm start"
+    start_post_command: "npm run generate-types"  # Optional: generate types after start
 
-  # Example: Microservice
+  # Example: Go microservice (process executor)
   api:
+    executor: process
     dir: services/api
     main_branch: develop
-    start_command: "go run main.go"           # Env vars set from registry
-    post_command: "make migrate && make seed" # Run migrations and seed data after start
+    start_command: "go run main.go"
+    start_post_command: "make migrate && make seed"
 
-  # Example: Worker/Queue
+  # Example: Worker/Queue (process executor)
   worker:
+    executor: process
     dir: worker
     main_branch: main
-    start_command: "python worker.py"         # Env vars set from registry
-    post_command: "python seed_jobs.py"
+    start_command: "python worker.py"
+    start_post_command: "python seed_jobs.py"
 
 # Preset configurations
 presets:
@@ -87,175 +124,201 @@ copies:
   # - source: "config.example.yml"
   #   target: "config.yml"
 
-# Port/Service display configuration
-# Customize what services are shown after setup and how ports are allocated
+# Environment variable configuration (single source of truth)
+# Defines all environment variables exported to start_command and post_command.
+# Entries can be: allocated ports (with range), calculated values (port expression
+# without range), string templates (with value field), or display-only (env: null).
 #
-# PORT EXPRESSION SYNTAX:
-# Ports support dynamic calculation using {instance} placeholder:
+# ENTRY TYPES:
 #
-# 1. Simple offset (most common):
-#    port: "3000 + {instance}"
-#    → Instance 0: 3000, Instance 1: 3001, Instance 2: 3002, etc.
+# 1. Allocated port — dynamically assigned from a range, no conflicts across instances:
+#    MY_PORT:
+#      name: "My Service"          # Display name (set to null to hide)
+#      url: "http://{host}:{port}" # URL template (set to null to hide)
+#      port: "3000"                # Base port hint
+#      env: "MY_PORT"              # Exported env var name (key = identifier only)
+#      range: [3000, 3100]         # Allocation range (required for allocation)
 #
-# 2. Multiplication (for port ranges like LocalStack):
-#    port: "4510 + {instance} * 50"
-#    → Instance 0: 4510, Instance 1: 4560, Instance 2: 4610, etc.
-#    Use this when each instance needs a block of ports (e.g., 50 ports for LocalStack)
+# 2. Calculated port — derived from {instance}, NOT allocated from a range:
+#    MY_EXT_PORT:
+#      port: "4510 + {instance} * 50"  # Calculated, not allocated
+#      env: "MY_EXT_PORT"
+#      # NO range field
 #
-# 3. Static value (same port for all instances):
-#    port: "8080"
-#    → Always 8080 (use only if service doesn't conflict across instances)
+#    PORT EXPRESSION SYNTAX:
+#    - Simple offset:    "3000 + {instance}"       → 3000, 3001, 3002, ...
+#    - Multiplication:   "4510 + {instance} * 50"  → 4510, 4560, 4610, ...
+#    - Static value:     "8080"                     → always 8080
 #
-# VALIDATION REQUIREMENTS:
-# - Port expressions must evaluate to integers in range 1-65535
-# - The {instance} placeholder is replaced with the instance number (0, 1, 2, ...)
-# - Expression evaluation happens once at feature creation time
-# - Results are stored in the registry for consistent allocation
+# 3. String template — non-port env var, may reference allocated ports as {VAR_NAME}:
+#    MY_API_URL:
+#      value: "http://localhost:{BE_PORT}"
+#      env: "MY_API_URL"
 #
-# COMMON PATTERNS:
-# - Frontend/Backend: Simple offset (3000 + {instance})
-# - Databases: Simple offset (5432 + {instance}, 3306 + {instance})
-# - Service ranges: Multiplication (4510 + {instance} * 50)
-# - Shared services: Static value ("8080") - use with caution!
+# 4. Display-only — shown in UI but not exported (env: null):
+#    swagger:
+#      name: "Swagger"
+#      url: "http://{host}:{port}/docs"
+#      port: "8080"
+#      env: null
 #
-# Each service definition needs:
-# - name: Display name for UI
-# - url: URL template with {host} and {port} placeholders
-# - port: Port expression (see syntax above)
+# RULES:
+# - Keys are identifiers only; the env field controls the actual variable name
+# - Entries with range are allocated (registry prevents conflicts between instances)
+# - Entries without range are calculated only (no conflict protection)
+# - Set name/url to null to suppress display in the UI
 #
-ports:
-  # Frontend example - Simple offset pattern
-  # Each instance gets consecutive port: 3000, 3001, 3002, ...
-  frontend:
+env_variables:
+  # ── Allocated ports ────────────────────────────────────────────────────────
+
+  FE_PORT:
     name: "Frontend"
     url: "http://{host}:{port}"
-    port: "3000 + {instance}"
+    port: "3000"
+    env: "FE_PORT"
+    range: [3000, 3100]
 
-  # Backend API - Simple offset pattern
-  # Shares same port pattern as frontend for simplicity
-  backend:
+  BE_PORT:
     name: "Backend API"
     url: "http://{host}:{port}"
-    port: "8080 + {instance}"
+    port: "8080"
+    env: "BE_PORT"
+    range: [8080, 8180]
 
-  # API documentation (Swagger, ReDoc, etc.)
-  # Often runs on same port as backend, just different path
-  docs:
-    name: "API Docs"
-    url: "http://{host}:{port}/docs"
-    port: "8080 + {instance}"      # Same as backend if served by backend
-
-  # Database examples - Simple offset pattern
-  # Each database type typically uses consecutive ports
-  postgres:
+  POSTGRES_PORT:
     name: "PostgreSQL"
     url: "{host}:{port}"
-    port: "5432 + {instance}"      # Standard PostgreSQL port + offset
+    port: "5432"
+    env: "POSTGRES_PORT"
+    range: [5432, 5532]
 
-  mysql:
-    name: "MySQL"
-    url: "{host}:{port}"
-    port: "3306 + {instance}"      # Standard MySQL port + offset
+  MYSQL_PORT:
+    name: null
+    url: null
+    port: "3306"
+    env: "MYSQL_PORT"
+    range: [3306, 3406]
 
-  mongo:
-    name: "MongoDB"
-    url: "mongodb://{host}:{port}"
-    port: "27017 + {instance}"     # Standard MongoDB port + offset
+  MONGO_PORT:
+    name: null
+    url: null
+    port: "27017"
+    env: "MONGO_PORT"
+    range: [27017, 27117]
 
-  redis:
-    name: "Redis"
-    url: "redis://{host}:{port}"
-    port: "6379 + {instance}"      # Standard Redis port + offset
+  REDIS_PORT:
+    name: null
+    url: null
+    port: "6379"
+    env: "REDIS_PORT"
+    range: [6379, 6479]
 
-  # Message queues - Simple offset pattern
-  rabbitmq:
+  RABBITMQ_PORT:
     name: "RabbitMQ"
     url: "http://{host}:{port}"
-    port: "15672 + {instance}"    # Management UI port (standard 15672 + offset)
+    port: "15672"
+    env: "RABBITMQ_PORT"
+    range: [15672, 15772]
 
-  kafka:
-    name: "Kafka"
-    url: "{host}:{port}"
-    port: "9092 + {instance}"     # Standard Kafka port + offset
+  KAFKA_PORT:
+    name: null
+    url: null
+    port: "9092"
+    env: "KAFKA_PORT"
+    range: [9092, 9192]
 
-  # Monitoring & Debugging - Simple offset pattern
-  grafana:
+  GRAFANA_PORT:
     name: "Grafana"
     url: "http://{host}:{port}"
-    port: "3001 + {instance}"     # 3001 to avoid conflict with frontend on 3000
+    port: "3001"
+    env: "GRAFANA_PORT"
+    range: [3001, 3101]
 
-  prometheus:
+  PROMETHEUS_PORT:
     name: "Prometheus"
     url: "http://{host}:{port}"
-    port: "9090 + {instance}"     # Standard Prometheus port + offset
+    port: "9090"
+    env: "PROMETHEUS_PORT"
+    range: [9090, 9190]
 
-  jaeger:
-    name: "Jaeger"
+  MAILPIT_SMTP_PORT:
+    name: null
+    url: null
+    port: "1025"
+    env: "MAILPIT_SMTP_PORT"
+    range: [1025, 1125]
+
+  MAILPIT_UI_PORT:
+    name: "Mailpit UI"
     url: "http://{host}:{port}"
-    port: "16686 + {instance}"    # Jaeger UI port + offset
+    port: "8025"
+    env: "MAILPIT_UI_PORT"
+    range: [8025, 8125]
 
-  # Development tools - Simple offset pattern
-  mailcatcher:
-    name: "Mail"
-    url: "http://{host}:{port}"
-    port: "1080 + {instance}"     # Mailcatcher web UI port + offset
-
-  adminer:
-    name: "Adminer"
-    url: "http://{host}:{port}"
-    port: "8082 + {instance}"     # Offset to avoid conflict with backend
-
-  # AWS LocalStack - Port range pattern
-  # LocalStack needs a range of ports for different services
-  # Main gateway port (edge port)
-  localstack:
+  LOCALSTACK_PORT:
     name: "LocalStack"
     url: "http://{host}:{port}"
-    port: "4566 + {instance}"     # Main LocalStack edge port
+    port: "4566"
+    env: "LOCALSTACK_PORT"
+    range: [4566, 4666]
 
-  # LocalStack extended port range (if needed)
-  # Use multiplication pattern when service needs multiple consecutive ports
-  localstack_ext_start:
-    name: "LocalStack Range Start"
-    url: ""                       # No direct URL for range markers
-    port: "4510 + {instance} * 50"  # Each instance gets 50-port block
-                                    # Instance 0: 4510-4559
-                                    # Instance 1: 4560-4609
-                                    # Instance 2: 4610-4659
+  GRPC_PORT:
+    name: null
+    url: null
+    port: "50051"
+    env: "GRPC_PORT"
+    range: [50051, 50151]
 
-  # gRPC services - Simple offset pattern
-  grpc:
-    name: "gRPC"
-    url: "{host}:{port}"
-    port: "50051 + {instance}"    # Standard gRPC port + offset
+  # ── Calculated ports (no range — not allocated, derived from {instance}) ───
+  # Use when a service needs a block of ports per instance (e.g. LocalStack ext).
+  # instance 0 → 4510–4559, instance 1 → 4560–4609, instance 2 → 4610–4659
 
-# IMPORTANT NOTES:
+  LOCALSTACK_EXT_START:
+    name: null
+    url: null
+    port: "4510 + {instance} * 50"
+    env: "LOCALSTACK_EXT_START"
+
+  LOCALSTACK_EXT_END:
+    name: null
+    url: null
+    port: "4559 + {instance} * 50"
+    env: "LOCALSTACK_EXT_END"
+
+  # ── String templates ────────────────────────────────────────────────────────
+
+  COMPOSE_PROJECT_NAME:
+    name: null
+    url: null
+    value: "{project}-{feature}-{service}"
+    env: "COMPOSE_PROJECT_NAME"
+
+  # ── Display-only ────────────────────────────────────────────────────────────
+  # Shown in the UI; env: null means not exported as an environment variable.
+
+  swagger:
+    name: "Swagger"
+    url: "http://{host}:{port}/docs/api/index.html"
+    port: "8080"
+    env: null                           # Uses BE_PORT; display only
+
+# NOTES:
 #
-# 1. PORT ALLOCATION STRATEGY:
-#    - Port expressions are evaluated once when creating a feature
-#    - Results are stored in registry for consistent allocation
-#    - The {instance} value comes from the feature's APP_PORT allocation
-#    - Registry ensures no port conflicts between features
+# 1. PORT ALLOCATION:
+#    - Only entries with range are allocated; registry prevents conflicts between instances
+#    - Entries without range are calculated on-the-fly (no conflict protection)
 #
-# 2. ENVIRONMENT VARIABLES:
-#    - Each port in this config becomes an environment variable
-#    - Variable name is the port key in UPPERCASE
-#    - Example: "frontend" → FE_PORT environment variable
-#    - These are automatically set when running start_command and post_command
+# 2. ADDING NEW SERVICES:
+#    - Allocated port:    add port + env + range
+#    - Calculated value:  add port expression (with {instance}), env, no range
+#    - String template:   add value (with {PLACEHOLDER}), env, no port/range
 #
-# 3. ADDING NEW SERVICES:
-#    - Choose appropriate pattern (simple offset vs multiplication)
-#    - Ensure base port + (max_instances * increment) doesn't exceed 65535
-#    - Test with multiple instances to verify no conflicts
-#    - Consider standard ports to make debugging easier
-#
-# 4. VALIDATION:
-#    - worktree manager validates expressions at startup
+# 3. VALIDATION:
 #    - Use 'worktree doctor' to check for port conflicts
 #    - Use 'worktree ports' to see all allocations
 #
-# 5. MIGRATION FROM HARDCODED PORTS:
-#    - Replace hardcoded ports in docker-compose.yml with ${PORT_VAR}
+# 4. MIGRATION FROM HARDCODED PORTS:
+#    - Replace hardcoded ports in docker-compose.yml with ${ENV_VAR_NAME}
 #    - Update scripts to use environment variables
 #    - Test with 'worktree new-feature' to verify allocation works
 

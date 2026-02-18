@@ -2,6 +2,10 @@
 
 A Go CLI tool for managing git worktrees in multi-instance development environments.
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
+> **Disclaimer:** This software is provided "as is", without warranty of any kind. See [LICENSE](LICENSE) for full terms.
+
 ## Features
 
 - **Coordinated Worktrees**: Creates backend + frontend worktrees together
@@ -36,8 +40,12 @@ tools/worktree-manager/
 ## Building
 
 ```bash
-make build          # Build binary to ../../scripts/worktree
-make clean          # Remove binary
+make build          # Build binary → ./worktree
+make install        # Install via go install → ~/go/bin/worktree
+make install-user   # Install to ~/.local/bin/worktree (no sudo)
+make install-global # Install to /usr/local/bin/worktree (requires sudo)
+make uninstall      # Remove from all install locations
+make clean          # Remove local ./worktree binary
 make test           # Run tests
 make fmt            # Format code
 make vet            # Vet code
@@ -49,25 +57,25 @@ make vet            # Vet code
 
 ```bash
 # Create new feature environment
-scripts/worktree new-feature feature/my-feature
+worktree new-feature feature/my-feature
 
 # Start existing feature
-scripts/worktree start feature-my-feature
+worktree start feature-my-feature
 
 # Start without post-startup commands
-scripts/worktree start feature-my-feature --no-fixtures
+worktree start feature-my-feature --no-fixtures
 
 # List all features
-scripts/worktree list
+worktree list
 
 # Show port allocations
-scripts/worktree ports
+worktree ports
 
 # Check environment health
-scripts/worktree doctor
+worktree doctor
 
 # Remove feature
-scripts/worktree remove feature/my-feature
+worktree remove feature/my-feature
 ```
 
 ## Dependencies
@@ -366,3 +374,23 @@ worktree list                # Show all features and status
 worktree ports               # Show port allocations
 worktree status <feature>    # Detailed feature status
 ```
+
+---
+
+## Contributing
+
+Contributions welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+
+## Security
+
+To report a vulnerability, see [SECURITY.md](SECURITY.md). Do not open public issues for security problems.
+
+## Code of Conduct
+
+This project follows the [Code of Conduct](CODE_OF_CONDUCT.md). By participating, you agree to uphold it.
+
+## License
+
+MIT License — see [LICENSE](LICENSE).
+
+This software is provided **"as is"**, without warranty of any kind, express or implied.

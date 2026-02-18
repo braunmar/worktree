@@ -4,9 +4,11 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 
 	"github.com/braunmar/worktree/pkg/config"
+	"github.com/braunmar/worktree/pkg/process"
 	"github.com/braunmar/worktree/pkg/registry"
 	"github.com/braunmar/worktree/pkg/ui"
 
@@ -146,7 +148,7 @@ func runStart(cmd *cobra.Command, args []string) {
 	ui.NewLine()
 
 	// Calculate instance from allocated APP_PORT in registry
-	appPortCfg := workCfg.Ports["APP_PORT"]
+	appPortCfg := workCfg.EnvVariables["APP_PORT"]
 	basePort, err := config.ExtractBasePort(appPortCfg.Port)
 	checkError(err)
 	instance := wt.Ports["APP_PORT"] - basePort
@@ -170,7 +172,7 @@ func runStart(cmd *cobra.Command, args []string) {
 	}
 
 	// Start ALL projects sequentially
-	for i, projectName := range projects {
+	for _, projectName := range projects {
 		project := workCfg.Projects[projectName]
 		worktreePath := featureDir + "/" + project.Dir
 
@@ -179,10 +181,6 @@ func runStart(cmd *cobra.Command, args []string) {
 			ui.Error(fmt.Sprintf("Worktree for %s does not exist: %s", projectName, worktreePath))
 			os.Exit(1)
 		}
-
-		// Start services
-		ui.Loading(fmt.Sprintf("Starting %s...", projectName))
-		ui.NewLine()
 
 		// Build environment list with per-service COMPOSE_PROJECT_NAME
 		envList := os.Environ()
@@ -199,15 +197,29 @@ func runStart(cmd *cobra.Command, args []string) {
 			ui.Info(fmt.Sprintf("Working directory: %s", worktreePath))
 		}
 
-		// Execute start command via shell
-		shellCmd := exec.Command("sh", "-c", project.StartCommand)
-		shellCmd.Dir = worktreePath
-		shellCmd.Env = envList
-		shellCmd.Stdout = os.Stdout
-		shellCmd.Stderr = os.Stderr
+		// Pre-start hook
+		runHookCommand(fmt.Sprintf("%s: start_pre_command", projectName), project.StartPreCommand, worktreePath, envList)
 
-		if err := shellCmd.Run(); err != nil {
-			ui.Error(fmt.Sprintf("Failed to start %s: %v", projectName, err))
+		// Start services
+		ui.Loading(fmt.Sprintf("Starting %s...", projectName))
+		ui.NewLine()
+
+		// Execute start command — behaviour depends on executor type
+		var startErr error
+		switch project.GetExecutor() {
+		case "process":
+			pidFile := filepath.Join(featureDir, projectName+".pid")
+			startErr = process.StartBackground(projectName, project.StartCommand, worktreePath, envList, pidFile)
+		default: // "docker"
+			shellCmd := exec.Command("sh", "-c", project.StartCommand)
+			shellCmd.Dir = worktreePath
+			shellCmd.Env = envList
+			shellCmd.Stdout = os.Stdout
+			shellCmd.Stderr = os.Stderr
+			startErr = shellCmd.Run()
+		}
+		if startErr != nil {
+			ui.Error(fmt.Sprintf("Failed to start %s: %v", projectName, startErr))
 			os.Exit(1)
 		}
 
@@ -215,25 +227,9 @@ func runStart(cmd *cobra.Command, args []string) {
 		ui.Success(fmt.Sprintf("%s started!", projectName))
 		ui.NewLine()
 
-		// Run post command for first project (unless --no-fixtures)
-		if i == 0 && !noFixtures && project.PostCommand != "" {
-			ui.Loading("Running post-startup tasks...")
-			ui.NewLine()
-
-			// Execute via shell to support && chains
-			postShellCmd := exec.Command("sh", "-c", project.PostCommand)
-			postShellCmd.Dir = worktreePath
-			postShellCmd.Env = envList
-			postShellCmd.Stdout = os.Stdout
-			postShellCmd.Stderr = os.Stderr
-
-			if err := postShellCmd.Run(); err != nil {
-				ui.Warning(fmt.Sprintf("Failed to run post-startup tasks: %v", err))
-				ui.Info(fmt.Sprintf("You can run manually: %s", project.PostCommand))
-			} else {
-				ui.Success("Post-startup tasks completed!")
-			}
-			ui.NewLine()
+		// Post-start hook (unless --no-fixtures)
+		if !noFixtures {
+			runHookCommand(fmt.Sprintf("%s: start_post_command", projectName), project.StartPostCommand, worktreePath, envList)
 		}
 	}
 

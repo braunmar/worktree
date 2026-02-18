@@ -57,7 +57,7 @@ func BuildPortRanges(workCfg *config.WorktreeConfig) map[string][2]int {
 	}
 
 	// Read all configured port ranges
-	for serviceName, portCfg := range workCfg.Ports {
+	for serviceName, portCfg := range workCfg.EnvVariables {
 		if portRange := portCfg.GetPortRange(); portRange != nil {
 			ranges[serviceName] = *portRange
 		}

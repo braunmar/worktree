@@ -16,7 +16,7 @@ func testConfig() *config.WorktreeConfig {
 	pgRange := [2]int{5432, 5532}
 
 	return &config.WorktreeConfig{
-		Ports: map[string]config.PortConfig{
+		EnvVariables: map[string]config.EnvVarConfig{
 			"FE_PORT": {
 				Range: &feRange,
 			},
@@ -268,7 +268,7 @@ func TestBuildPortRanges(t *testing.T) {
 	// Test with configured explicit ranges
 	explicitRange := [2]int{4000, 4100}
 	workCfg := &config.WorktreeConfig{
-		Ports: map[string]config.PortConfig{
+		EnvVariables: map[string]config.EnvVarConfig{
 			"FE_PORT": {
 				Range: &explicitRange,
 			},
@@ -286,7 +286,7 @@ func TestBuildPortRanges(t *testing.T) {
 
 	// Test with port expression (no explicit range)
 	workCfg2 := &config.WorktreeConfig{
-		Ports: map[string]config.PortConfig{
+		EnvVariables: map[string]config.EnvVarConfig{
 			"BE_PORT": {
 				Port: "9000 + {instance}",
 			},
@@ -310,7 +310,7 @@ func TestConfiguredPortAllocation(t *testing.T) {
 	// Create config with custom range
 	customRange := [2]int{5000, 5100}
 	workCfg := &config.WorktreeConfig{
-		Ports: map[string]config.PortConfig{
+		EnvVariables: map[string]config.EnvVarConfig{
 			"FE_PORT": {
 				Range: &customRange,
 			},
@@ -335,5 +335,136 @@ func TestConfiguredPortAllocation(t *testing.T) {
 	}
 	if port >= 3000 && port <= 3100 {
 		t.Errorf("Port %d is in default range, should use configured range", port)
+	}
+}
+
+func TestGetComposeProject(t *testing.T) {
+	t.Run("returns per-service compose project name", func(t *testing.T) {
+		wt := &Worktree{
+			ComposeProjects: map[string]string{
+				"backend":  "skillsetup-feature-x-backend",
+				"frontend": "skillsetup-feature-x-frontend",
+			},
+			ComposeProject: "skillsetup-feature-x",
+		}
+		if got := wt.GetComposeProject("backend"); got != "skillsetup-feature-x-backend" {
+			t.Errorf("GetComposeProject(backend) = %q, want %q", got, "skillsetup-feature-x-backend")
+		}
+		if got := wt.GetComposeProject("frontend"); got != "skillsetup-feature-x-frontend" {
+			t.Errorf("GetComposeProject(frontend) = %q, want %q", got, "skillsetup-feature-x-frontend")
+		}
+	})
+
+	t.Run("falls back to legacy ComposeProject when per-service not set", func(t *testing.T) {
+		wt := &Worktree{
+			ComposeProject: "legacy-compose-project",
+		}
+		if got := wt.GetComposeProject("backend"); got != "legacy-compose-project" {
+			t.Errorf("GetComposeProject(backend) = %q, want %q", got, "legacy-compose-project")
+		}
+	})
+
+	t.Run("falls back to legacy when service not in per-service map", func(t *testing.T) {
+		wt := &Worktree{
+			ComposeProjects: map[string]string{
+				"backend": "proj-backend",
+			},
+			ComposeProject: "legacy",
+		}
+		if got := wt.GetComposeProject("frontend"); got != "legacy" {
+			t.Errorf("GetComposeProject(frontend) = %q, want %q", got, "legacy")
+		}
+	})
+
+	t.Run("returns empty string when no compose project set", func(t *testing.T) {
+		wt := &Worktree{}
+		if got := wt.GetComposeProject("backend"); got != "" {
+			t.Errorf("GetComposeProject(backend) = %q, want empty", got)
+		}
+	})
+}
+
+func TestList(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "registry-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	reg, err := Load(tempDir, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Run("empty registry returns empty list", func(t *testing.T) {
+		list := reg.List()
+		if len(list) != 0 {
+			t.Errorf("List() on empty registry returned %d items, want 0", len(list))
+		}
+	})
+
+	t.Run("returns all worktrees", func(t *testing.T) {
+		wt1 := &Worktree{Branch: "feature/one", Normalized: "feature-one"}
+		wt2 := &Worktree{Branch: "feature/two", Normalized: "feature-two"}
+		wt3 := &Worktree{Branch: "feature/three", Normalized: "feature-three"}
+
+		reg.Add(wt1)
+		reg.Add(wt2)
+		reg.Add(wt3)
+
+		list := reg.List()
+		if len(list) != 3 {
+			t.Errorf("List() returned %d items, want 3", len(list))
+		}
+
+		// Verify all worktrees are present (order not guaranteed)
+		found := make(map[string]bool)
+		for _, wt := range list {
+			found[wt.Normalized] = true
+		}
+		for _, name := range []string{"feature-one", "feature-two", "feature-three"} {
+			if !found[name] {
+				t.Errorf("List() missing worktree %q", name)
+			}
+		}
+	})
+}
+
+func TestFindAvailablePort_Exhausted(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "registry-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	// Use a tiny 2-port range
+	tinyRange := [2]int{19998, 19999}
+	workCfg := &config.WorktreeConfig{
+		EnvVariables: map[string]config.EnvVarConfig{
+			"MY_PORT": {Range: &tinyRange},
+		},
+	}
+
+	reg, err := Load(tempDir, workCfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Allocate both ports in the registry so they appear "in use"
+	reg.Add(&Worktree{
+		Branch:     "feature/one",
+		Normalized: "feature-one",
+		Ports:      map[string]int{"MY_PORT": 19998},
+	})
+	reg.Add(&Worktree{
+		Branch:     "feature/two",
+		Normalized: "feature-two",
+		Ports:      map[string]int{"MY_PORT": 19999},
+	})
+
+	// All registry ports are taken; FindAvailablePort should fail
+	_, err = reg.FindAvailablePort("MY_PORT")
+	if err == nil {
+		t.Error("expected error when all ports in range are already allocated in registry")
 	}
 }

@@ -26,13 +26,13 @@ type WorktreeConfig struct {
 	AutoFixtures    bool                       `yaml:"auto_fixtures"`
 	Symlinks        []FileLink                 `yaml:"symlinks"`
 	Copies          []FileLink                 `yaml:"copies"`
-	Ports           map[string]PortConfig      `yaml:"ports"`
+	EnvVariables    map[string]EnvVarConfig    `yaml:"env_variables"`
 	GeneratedFiles  map[string][]GeneratedFile `yaml:"generated_files"`
 	ScheduledAgents ScheduledAgents            `yaml:"scheduled_agents"` // NEW: Scheduled agent tasks
 }
 
-// PortConfig represents a port/service display configuration
-type PortConfig struct {
+// EnvVarConfig represents an environment variable configuration entry (port, string template, or display-only)
+type EnvVarConfig struct {
 	Name  string   `yaml:"name"`
 	URL   string   `yaml:"url"`
 	Port  string   `yaml:"port"`  // Expression like "3000 + {instance}" or null for non-port configs
@@ -43,11 +43,25 @@ type PortConfig struct {
 
 // ProjectConfig represents a single project configuration
 type ProjectConfig struct {
-	Dir              string `yaml:"dir"`
-	MainBranch       string `yaml:"main_branch"`
-	StartCommand     string `yaml:"start_command"`
-	PostCommand      string `yaml:"post_command"` // Runs after start (fixtures, seed, etc.)
-	ClaudeWorkingDir bool   `yaml:"claude_working_dir"`
+	Executor            string `yaml:"executor"`            // "docker" (default) or "process"
+	Dir                 string `yaml:"dir"`
+	MainBranch          string `yaml:"main_branch"`
+	StartPreCommand     string `yaml:"start_pre_command"`  // Runs before start_command
+	StartCommand        string `yaml:"start_command"`
+	StartPostCommand    string `yaml:"start_post_command"` // Runs after start_command (fixtures, seed, etc.)
+	StopPreCommand      string `yaml:"stop_pre_command"`   // Runs before stopping services
+	StopPostCommand     string `yaml:"stop_post_command"`  // Runs after stopping services
+	RestartPreCommand   string `yaml:"restart_pre_command"`  // Runs before the full restart cycle
+	RestartPostCommand  string `yaml:"restart_post_command"` // Runs after the full restart cycle
+	ClaudeWorkingDir    bool   `yaml:"claude_working_dir"`
+}
+
+// GetExecutor returns the executor type, defaulting to "docker" if not set.
+func (p *ProjectConfig) GetExecutor() string {
+	if p.Executor == "" {
+		return "docker"
+	}
+	return p.Executor
 }
 
 // PresetConfig represents a preset configuration
@@ -150,7 +164,7 @@ func (c *WorktreeConfig) Validate() error {
 	}
 
 	// Validate port ranges
-	for name, portCfg := range c.Ports {
+	for name, portCfg := range c.EnvVariables {
 		if portCfg.Range != nil {
 			if portCfg.Range[0] < 1 || portCfg.Range[1] > 65535 {
 				return fmt.Errorf("port %s: range [%d, %d] outside valid range 1-65535",
@@ -347,7 +361,7 @@ func CalculatePort(expression string, instance int) (int, error) {
 }
 
 // GetPortURL generates the URL for a port configuration
-func (pc *PortConfig) GetURL(hostname string, port int) string {
+func (pc *EnvVarConfig) GetURL(hostname string, port int) string {
 	url := strings.ReplaceAll(pc.URL, "{host}", hostname)
 	url = strings.ReplaceAll(url, "{port}", fmt.Sprintf("%d", port))
 	return url
@@ -355,7 +369,7 @@ func (pc *PortConfig) GetURL(hostname string, port int) string {
 
 // GetValue calculates the value for this port config (either port or string template)
 // Returns empty string if calculation fails
-func (pc *PortConfig) GetValue(instance int, envVars map[string]string) string {
+func (pc *EnvVarConfig) GetValue(instance int, envVars map[string]string) string {
 	if pc.Port != "" {
 		// Port calculation
 		port, err := CalculatePort(pc.Port, instance)
@@ -391,7 +405,7 @@ func (c *WorktreeConfig) ExportEnvVars(instance int) map[string]string {
 	envVars["INSTANCE"] = fmt.Sprintf("%d", instance)
 
 	// First pass: Export all port values (both allocated and calculated ports)
-	for _, portCfg := range c.Ports {
+	for _, portCfg := range c.EnvVariables {
 		if portCfg.Env != "" && portCfg.Port != "" {
 			value := portCfg.GetValue(instance, envVars)
 			if value != "" {
@@ -401,7 +415,7 @@ func (c *WorktreeConfig) ExportEnvVars(instance int) map[string]string {
 	}
 
 	// Second pass: Export string templates that depend on ports
-	for _, portCfg := range c.Ports {
+	for _, portCfg := range c.EnvVariables {
 		if portCfg.Env != "" && portCfg.Value != "" {
 			value := portCfg.GetValue(instance, envVars)
 			if value != "" {
@@ -461,7 +475,7 @@ func (c *WorktreeConfig) GetClaudeWorkingProject() string {
 }
 
 // GetPortRange extracts port range from either explicit Range field or Port expression
-func (pc *PortConfig) GetPortRange() *[2]int {
+func (pc *EnvVarConfig) GetPortRange() *[2]int {
 	// 1. If explicit range defined, use it
 	if pc.Range != nil {
 		return pc.Range
@@ -501,7 +515,7 @@ func ExtractBasePort(expr string) (int, error) {
 // GetServiceURL returns the formatted URL for a service by port env name
 // Returns empty string if port not found or URL not configured
 func (c *WorktreeConfig) GetServiceURL(portEnvName string, ports map[string]int) string {
-	portCfg, exists := c.Ports[portEnvName]
+	portCfg, exists := c.EnvVariables[portEnvName]
 	if !exists || portCfg.URL == "" {
 		return ""
 	}
@@ -519,7 +533,7 @@ func (c *WorktreeConfig) GetServiceURL(portEnvName string, ports map[string]int)
 func (c *WorktreeConfig) GetDisplayableServices(ports map[string]int) map[string]string {
 	services := make(map[string]string)
 
-	for envName, portCfg := range c.Ports {
+	for envName, portCfg := range c.EnvVariables {
 		// Skip if name or URL not configured (these are not meant to be displayed)
 		if portCfg.Name == "" || portCfg.URL == "" {
 			continue
@@ -555,7 +569,7 @@ func CalculateRelativePath(worktreeDepth int) string {
 // This excludes template-only services like COMPOSE_PROJECT_NAME
 func (c *WorktreeConfig) GetPortServiceNames() []string {
 	var services []string
-	for name, portCfg := range c.Ports {
+	for name, portCfg := range c.EnvVariables {
 		// Only include services that need port allocation (have both env and range)
 		if portCfg.Env != "" && portCfg.Range != nil {
 			services = append(services, name)
@@ -567,7 +581,7 @@ func (c *WorktreeConfig) GetPortServiceNames() []string {
 // GetComposeProjectTemplate returns the template for compose project names
 // Returns "{project}-{feature}" as default if not configured
 func (c *WorktreeConfig) GetComposeProjectTemplate() string {
-	if portCfg, exists := c.Ports["COMPOSE_PROJECT_NAME"]; exists && portCfg.Value != "" {
+	if portCfg, exists := c.EnvVariables["COMPOSE_PROJECT_NAME"]; exists && portCfg.Value != "" {
 		return portCfg.Value
 	}
 	// Default template for backward compatibility

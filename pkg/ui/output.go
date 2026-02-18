@@ -64,7 +64,7 @@ func CrossMark(message string) {
 }
 
 // ShowPortsFromConfig displays port mapping from configuration
-func ShowPortsFromConfig(hostname string, instance int, ports map[string]int, portConfigs map[string]config.PortConfig) {
+func ShowPortsFromConfig(hostname string, instance int, ports map[string]int, portConfigs map[string]config.EnvVarConfig) {
 	if len(portConfigs) == 0 {
 		// Fallback to showing instance number only
 		fmt.Printf("\n%s Instance %d configured\n\n", "📍", instance)

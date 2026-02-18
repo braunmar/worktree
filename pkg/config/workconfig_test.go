@@ -3,6 +3,9 @@ package config
 import (
 	"fmt"
 	"math"
+	"os"
+	"path/filepath"
+	"sort"
 	"testing"
 )
 
@@ -408,7 +411,7 @@ func TestExportEnvVars(t *testing.T) {
 		{
 			name: "basic port configs",
 			config: &WorktreeConfig{
-				Ports: map[string]PortConfig{
+				EnvVariables: map[string]EnvVarConfig{
 					"FE_PORT": {
 						Name: "Frontend",
 						Port: "3000 + {instance}",
@@ -431,7 +434,7 @@ func TestExportEnvVars(t *testing.T) {
 		{
 			name: "complex port calculation",
 			config: &WorktreeConfig{
-				Ports: map[string]PortConfig{
+				EnvVariables: map[string]EnvVarConfig{
 					"PG_PORT": {
 						Name: "PostgreSQL",
 						Port: "5432 + {instance} * 10",
@@ -448,7 +451,7 @@ func TestExportEnvVars(t *testing.T) {
 		{
 			name: "static port",
 			config: &WorktreeConfig{
-				Ports: map[string]PortConfig{
+				EnvVariables: map[string]EnvVarConfig{
 					"REDIS_PORT": {
 						Name: "Redis",
 						Port: "6379",
@@ -465,7 +468,7 @@ func TestExportEnvVars(t *testing.T) {
 		{
 			name: "string template (non-port value)",
 			config: &WorktreeConfig{
-				Ports: map[string]PortConfig{
+				EnvVariables: map[string]EnvVarConfig{
 					"COMPOSE_PROJECT_NAME": {
 						Value: "myproject-inst{instance}",
 						Env:   "COMPOSE_PROJECT_NAME",
@@ -481,7 +484,7 @@ func TestExportEnvVars(t *testing.T) {
 		{
 			name: "mixed port and value configs",
 			config: &WorktreeConfig{
-				Ports: map[string]PortConfig{
+				EnvVariables: map[string]EnvVarConfig{
 					"FE_PORT": {
 						Name: "Frontend",
 						Port: "3000 + {instance}",
@@ -503,7 +506,7 @@ func TestExportEnvVars(t *testing.T) {
 		{
 			name: "port config without env var",
 			config: &WorktreeConfig{
-				Ports: map[string]PortConfig{
+				EnvVariables: map[string]EnvVarConfig{
 					"FE_PORT": {
 						Name: "Frontend",
 						Port: "3000 + {instance}",
@@ -563,8 +566,8 @@ func TestExportEnvVars(t *testing.T) {
 func TestExportEnvVars_InstanceAlwaysPresent(t *testing.T) {
 	configs := []*WorktreeConfig{
 		{},                               // Empty config
-		{Ports: map[string]PortConfig{}}, // Empty ports
-		{Ports: map[string]PortConfig{
+		{EnvVariables: map[string]EnvVarConfig{}}, // Empty ports
+		{EnvVariables: map[string]EnvVarConfig{
 			"FE_PORT": {Port: "3000", Env: "FE_PORT"},
 		}},
 	}
@@ -668,17 +671,17 @@ func TestConfigValidation(t *testing.T) {
 	}
 }
 
-// TestPortConfig_GetValue tests the GetValue method
-func TestPortConfig_GetValue(t *testing.T) {
+// TestEnvVarConfig_GetValue tests the GetValue method
+func TestEnvVarConfig_GetValue(t *testing.T) {
 	tests := []struct {
 		name     string
-		portCfg  PortConfig
+		portCfg  EnvVarConfig
 		instance int
 		want     string
 	}{
 		{
 			name: "port expression",
-			portCfg: PortConfig{
+			portCfg: EnvVarConfig{
 				Port: "3000 + {instance}",
 			},
 			instance: 1,
@@ -686,7 +689,7 @@ func TestPortConfig_GetValue(t *testing.T) {
 		},
 		{
 			name: "string value template",
-			portCfg: PortConfig{
+			portCfg: EnvVarConfig{
 				Value: "myproject-{instance}",
 			},
 			instance: 2,
@@ -694,7 +697,7 @@ func TestPortConfig_GetValue(t *testing.T) {
 		},
 		{
 			name: "static port",
-			portCfg: PortConfig{
+			portCfg: EnvVarConfig{
 				Port: "8080",
 			},
 			instance: 0,
@@ -702,7 +705,7 @@ func TestPortConfig_GetValue(t *testing.T) {
 		},
 		{
 			name:     "empty config",
-			portCfg:  PortConfig{},
+			portCfg:  EnvVarConfig{},
 			instance: 0,
 			want:     "",
 		},
@@ -718,16 +721,16 @@ func TestPortConfig_GetValue(t *testing.T) {
 	}
 }
 
-// TestPortConfig_GetPortRange tests port range extraction
-func TestPortConfig_GetPortRange(t *testing.T) {
+// TestEnvVarConfig_GetPortRange tests port range extraction
+func TestEnvVarConfig_GetPortRange(t *testing.T) {
 	tests := []struct {
 		name    string
-		portCfg PortConfig
+		portCfg EnvVarConfig
 		want    *[2]int
 	}{
 		{
 			name: "explicit range",
-			portCfg: PortConfig{
+			portCfg: EnvVarConfig{
 				Port:  "3000 + {instance}",
 				Range: &[2]int{3000, 3100},
 			},
@@ -735,26 +738,26 @@ func TestPortConfig_GetPortRange(t *testing.T) {
 		},
 		{
 			name: "port expression with placeholder",
-			portCfg: PortConfig{
+			portCfg: EnvVarConfig{
 				Port: "5000 + {instance}",
 			},
 			want: &[2]int{5000, 5100}, // ExtractBasePort replaces {instance} with 0 and extracts base
 		},
 		{
 			name: "static port",
-			portCfg: PortConfig{
+			portCfg: EnvVarConfig{
 				Port: "8080",
 			},
 			want: &[2]int{8080, 8180},
 		},
 		{
 			name:    "no range available",
-			portCfg: PortConfig{},
+			portCfg: EnvVarConfig{},
 			want:    nil,
 		},
 		{
 			name: "explicit range takes precedence",
-			portCfg: PortConfig{
+			portCfg: EnvVarConfig{
 				Port:  "3000 + {instance}",
 				Range: &[2]int{4000, 4500},
 			},
@@ -783,4 +786,708 @@ func TestPortConfig_GetPortRange(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestValidateProjectName tests project name validation
+func TestValidateProjectName(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   string
+		wantErr bool
+	}{
+		{"valid simple name", "myproject", false},
+		{"valid with hyphens", "my-project-name", false},
+		{"valid alphanumeric", "proj1", false},
+		{"valid mixed case", "MyProject", false},
+		{"empty string", "", true},
+		{"starts with hyphen", "-project", true},
+		{"ends with hyphen", "project-", true},
+		{"contains underscore", "my_project", true},
+		{"contains dot", "my.project", true},
+		{"contains space", "my project", true},
+		{"contains slash", "my/project", true},
+		{"contains special char", "proj@name", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateProjectName(tt.input)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("validateProjectName(%q) error = %v, wantErr %v", tt.input, err, tt.wantErr)
+			}
+		})
+	}
+}
+
+// TestLoadWorktreeConfig tests loading config from a YAML file
+func TestLoadWorktreeConfig(t *testing.T) {
+	t.Run("missing file returns error", func(t *testing.T) {
+		_, err := LoadWorktreeConfig("/nonexistent/path")
+		if err == nil {
+			t.Error("expected error for missing config file")
+		}
+	})
+
+	t.Run("valid config loads correctly", func(t *testing.T) {
+		dir := t.TempDir()
+		content := `project_name: testproject
+projects:
+  backend:
+    dir: backend
+    main_branch: main
+presets:
+  default:
+    projects: [backend]
+default_preset: default
+`
+		if err := os.WriteFile(filepath.Join(dir, ".worktree.yml"), []byte(content), 0644); err != nil {
+			t.Fatal(err)
+		}
+
+		cfg, err := LoadWorktreeConfig(dir)
+		if err != nil {
+			t.Fatalf("LoadWorktreeConfig() error = %v", err)
+		}
+		if cfg.ProjectName != "testproject" {
+			t.Errorf("ProjectName = %q, want %q", cfg.ProjectName, "testproject")
+		}
+		if cfg.Hostname != "localhost" {
+			t.Errorf("Hostname = %q, want %q (default)", cfg.Hostname, "localhost")
+		}
+	})
+
+	t.Run("missing project_name returns error", func(t *testing.T) {
+		dir := t.TempDir()
+		content := `projects:
+  backend:
+    dir: backend
+presets:
+  default:
+    projects: [backend]
+`
+		if err := os.WriteFile(filepath.Join(dir, ".worktree.yml"), []byte(content), 0644); err != nil {
+			t.Fatal(err)
+		}
+		_, err := LoadWorktreeConfig(dir)
+		if err == nil {
+			t.Error("expected error for missing project_name")
+		}
+	})
+
+	t.Run("invalid project_name returns error", func(t *testing.T) {
+		dir := t.TempDir()
+		content := `project_name: invalid_name
+projects:
+  backend:
+    dir: backend
+presets:
+  default:
+    projects: [backend]
+`
+		if err := os.WriteFile(filepath.Join(dir, ".worktree.yml"), []byte(content), 0644); err != nil {
+			t.Fatal(err)
+		}
+		_, err := LoadWorktreeConfig(dir)
+		if err == nil {
+			t.Error("expected error for invalid project_name with underscore")
+		}
+	})
+
+	t.Run("custom hostname is preserved", func(t *testing.T) {
+		dir := t.TempDir()
+		content := `project_name: myproj
+hostname: myhost.local
+projects:
+  backend:
+    dir: backend
+presets:
+  default:
+    projects: [backend]
+`
+		if err := os.WriteFile(filepath.Join(dir, ".worktree.yml"), []byte(content), 0644); err != nil {
+			t.Fatal(err)
+		}
+		cfg, err := LoadWorktreeConfig(dir)
+		if err != nil {
+			t.Fatalf("LoadWorktreeConfig() error = %v", err)
+		}
+		if cfg.Hostname != "myhost.local" {
+			t.Errorf("Hostname = %q, want %q", cfg.Hostname, "myhost.local")
+		}
+	})
+}
+
+// TestGetPreset tests preset retrieval
+func TestGetPreset(t *testing.T) {
+	cfg := &WorktreeConfig{
+		DefaultPreset: "default",
+		Presets: map[string]PresetConfig{
+			"default":  {Projects: []string{"backend", "frontend"}},
+			"backend":  {Projects: []string{"backend"}},
+			"frontend": {Projects: []string{"frontend"}},
+		},
+	}
+
+	t.Run("get named preset", func(t *testing.T) {
+		preset, err := cfg.GetPreset("backend")
+		if err != nil {
+			t.Fatalf("GetPreset() error = %v", err)
+		}
+		if len(preset.Projects) != 1 || preset.Projects[0] != "backend" {
+			t.Errorf("GetPreset(\"backend\") = %v, want [backend]", preset.Projects)
+		}
+	})
+
+	t.Run("empty name returns default preset", func(t *testing.T) {
+		preset, err := cfg.GetPreset("")
+		if err != nil {
+			t.Fatalf("GetPreset(\"\") error = %v", err)
+		}
+		if len(preset.Projects) != 2 {
+			t.Errorf("GetPreset(\"\") returned %d projects, want 2", len(preset.Projects))
+		}
+	})
+
+	t.Run("nonexistent preset returns error", func(t *testing.T) {
+		_, err := cfg.GetPreset("nonexistent")
+		if err == nil {
+			t.Error("expected error for nonexistent preset")
+		}
+	})
+}
+
+// TestGetProjectsForPreset tests project list retrieval for a preset
+func TestGetProjectsForPreset(t *testing.T) {
+	cfg := &WorktreeConfig{
+		DefaultPreset: "fullstack",
+		Projects: map[string]ProjectConfig{
+			"backend":  {Dir: "backend"},
+			"frontend": {Dir: "frontend"},
+		},
+		Presets: map[string]PresetConfig{
+			"fullstack": {Projects: []string{"backend", "frontend"}},
+			"beonly":    {Projects: []string{"backend"}},
+		},
+	}
+
+	t.Run("returns projects for preset", func(t *testing.T) {
+		projects, err := cfg.GetProjectsForPreset("beonly")
+		if err != nil {
+			t.Fatalf("GetProjectsForPreset() error = %v", err)
+		}
+		if len(projects) != 1 {
+			t.Errorf("expected 1 project, got %d", len(projects))
+		}
+		if projects[0].Dir != "backend" {
+			t.Errorf("expected Dir=backend, got %q", projects[0].Dir)
+		}
+	})
+
+	t.Run("returns all projects for fullstack preset", func(t *testing.T) {
+		projects, err := cfg.GetProjectsForPreset("fullstack")
+		if err != nil {
+			t.Fatalf("GetProjectsForPreset() error = %v", err)
+		}
+		if len(projects) != 2 {
+			t.Errorf("expected 2 projects, got %d", len(projects))
+		}
+	})
+
+	t.Run("nonexistent preset returns error", func(t *testing.T) {
+		_, err := cfg.GetProjectsForPreset("missing")
+		if err == nil {
+			t.Error("expected error for missing preset")
+		}
+	})
+}
+
+// TestGetURL tests URL generation from port config
+func TestGetURL(t *testing.T) {
+	tests := []struct {
+		name     string
+		cfg      EnvVarConfig
+		hostname string
+		port     int
+		want     string
+	}{
+		{
+			name:     "http URL template",
+			cfg:      EnvVarConfig{URL: "http://{host}:{port}"},
+			hostname: "localhost",
+			port:     3000,
+			want:     "http://localhost:3000",
+		},
+		{
+			name:     "custom hostname",
+			cfg:      EnvVarConfig{URL: "http://{host}:{port}/api"},
+			hostname: "myhost.local",
+			port:     8080,
+			want:     "http://myhost.local:8080/api",
+		},
+		{
+			name:     "no placeholders",
+			cfg:      EnvVarConfig{URL: "http://fixed-url"},
+			hostname: "localhost",
+			port:     3000,
+			want:     "http://fixed-url",
+		},
+		{
+			name:     "empty URL",
+			cfg:      EnvVarConfig{URL: ""},
+			hostname: "localhost",
+			port:     3000,
+			want:     "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := tt.cfg.GetURL(tt.hostname, tt.port)
+			if got != tt.want {
+				t.Errorf("GetURL(%q, %d) = %q, want %q", tt.hostname, tt.port, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestGetDisplayableServices tests displayable service retrieval
+func TestGetDisplayableServices(t *testing.T) {
+	cfg := &WorktreeConfig{
+		Hostname: "localhost",
+		EnvVariables: map[string]EnvVarConfig{
+			"FE_PORT": {
+				Name: "Frontend",
+				URL:  "http://{host}:{port}",
+				Port: "3000 + {instance}",
+			},
+			"BE_PORT": {
+				Name: "Backend API",
+				URL:  "http://{host}:{port}/api",
+				Port: "8080 + {instance}",
+			},
+			"PG_PORT": {
+				// No Name or URL - should not be displayed
+				Port: "5432 + {instance}",
+			},
+		},
+	}
+
+	ports := map[string]int{
+		"FE_PORT": 3001,
+		"BE_PORT": 8081,
+		"PG_PORT": 5433,
+	}
+
+	t.Run("returns only services with name and URL", func(t *testing.T) {
+		services := cfg.GetDisplayableServices(ports)
+		if _, ok := services["Frontend"]; !ok {
+			t.Error("expected Frontend in displayable services")
+		}
+		if _, ok := services["Backend API"]; !ok {
+			t.Error("expected Backend API in displayable services")
+		}
+		if len(services) != 2 {
+			t.Errorf("expected 2 displayable services, got %d: %v", len(services), services)
+		}
+	})
+
+	t.Run("correct URL generation", func(t *testing.T) {
+		services := cfg.GetDisplayableServices(ports)
+		if got := services["Frontend"]; got != "http://localhost:3001" {
+			t.Errorf("Frontend URL = %q, want %q", got, "http://localhost:3001")
+		}
+		if got := services["Backend API"]; got != "http://localhost:8081/api" {
+			t.Errorf("Backend API URL = %q, want %q", got, "http://localhost:8081/api")
+		}
+	})
+}
+
+// TestGetServiceURL tests per-service URL lookup
+func TestGetServiceURL(t *testing.T) {
+	cfg := &WorktreeConfig{
+		Hostname: "localhost",
+		EnvVariables: map[string]EnvVarConfig{
+			"FE_PORT": {Name: "Frontend", URL: "http://{host}:{port}"},
+			"NO_URL":  {Name: "No URL service"},
+		},
+	}
+
+	ports := map[string]int{"FE_PORT": 3001}
+
+	t.Run("returns URL for configured service", func(t *testing.T) {
+		url := cfg.GetServiceURL("FE_PORT", ports)
+		if url != "http://localhost:3001" {
+			t.Errorf("GetServiceURL() = %q, want %q", url, "http://localhost:3001")
+		}
+	})
+
+	t.Run("returns empty for service without URL", func(t *testing.T) {
+		url := cfg.GetServiceURL("NO_URL", ports)
+		if url != "" {
+			t.Errorf("GetServiceURL(NO_URL) = %q, want empty", url)
+		}
+	})
+
+	t.Run("returns empty for nonexistent service", func(t *testing.T) {
+		url := cfg.GetServiceURL("MISSING", ports)
+		if url != "" {
+			t.Errorf("GetServiceURL(MISSING) = %q, want empty", url)
+		}
+	})
+
+	t.Run("returns empty when port not allocated", func(t *testing.T) {
+		url := cfg.GetServiceURL("FE_PORT", map[string]int{})
+		if url != "" {
+			t.Errorf("GetServiceURL() with missing port = %q, want empty", url)
+		}
+	})
+}
+
+// TestGetPortServiceNames tests port service name extraction
+func TestGetPortServiceNames(t *testing.T) {
+	r1 := [2]int{3000, 3100}
+	r2 := [2]int{8080, 8180}
+
+	cfg := &WorktreeConfig{
+		EnvVariables: map[string]EnvVarConfig{
+			"FE_PORT": {Env: "FE_PORT", Range: &r1},
+			"BE_PORT": {Env: "BE_PORT", Range: &r2},
+			"CALC":    {Env: "CALC", Port: "9000 + {instance}"},  // no Range - excluded
+			"NOENV":   {Range: &r1},                               // no Env - excluded
+			"TMPL":    {Env: "TMPL", Value: "proj-{instance}"},   // value only - excluded
+		},
+	}
+
+	services := cfg.GetPortServiceNames()
+	sort.Strings(services)
+
+	if len(services) != 2 {
+		t.Errorf("GetPortServiceNames() returned %d services, want 2: %v", len(services), services)
+	}
+	if services[0] != "BE_PORT" || services[1] != "FE_PORT" {
+		t.Errorf("GetPortServiceNames() = %v, want [BE_PORT FE_PORT]", services)
+	}
+}
+
+// TestGetComposeProjectTemplate tests compose project template retrieval
+func TestGetComposeProjectTemplate(t *testing.T) {
+	t.Run("returns configured template", func(t *testing.T) {
+		cfg := &WorktreeConfig{
+			EnvVariables: map[string]EnvVarConfig{
+				"COMPOSE_PROJECT_NAME": {
+					Value: "{project}-{feature}-{service}",
+					Env:   "COMPOSE_PROJECT_NAME",
+				},
+			},
+		}
+		got := cfg.GetComposeProjectTemplate()
+		if got != "{project}-{feature}-{service}" {
+			t.Errorf("GetComposeProjectTemplate() = %q, want %q", got, "{project}-{feature}-{service}")
+		}
+	})
+
+	t.Run("returns default when not configured", func(t *testing.T) {
+		cfg := &WorktreeConfig{}
+		got := cfg.GetComposeProjectTemplate()
+		if got != "{project}-{feature}" {
+			t.Errorf("GetComposeProjectTemplate() = %q, want %q", got, "{project}-{feature}")
+		}
+	})
+
+	t.Run("returns default when value is empty", func(t *testing.T) {
+		cfg := &WorktreeConfig{
+			EnvVariables: map[string]EnvVarConfig{
+				"COMPOSE_PROJECT_NAME": {Env: "COMPOSE_PROJECT_NAME"},
+			},
+		}
+		got := cfg.GetComposeProjectTemplate()
+		if got != "{project}-{feature}" {
+			t.Errorf("GetComposeProjectTemplate() = %q, want %q", got, "{project}-{feature}")
+		}
+	})
+}
+
+// TestReplaceComposeProjectPlaceholders tests placeholder replacement in compose templates
+func TestReplaceComposeProjectPlaceholders(t *testing.T) {
+	cfg := &WorktreeConfig{ProjectName: "skillsetup"}
+
+	tests := []struct {
+		name        string
+		template    string
+		featureName string
+		serviceName string
+		want        string
+	}{
+		{
+			name:        "all placeholders replaced",
+			template:    "{project}-{feature}-{service}",
+			featureName: "feature-user-auth",
+			serviceName: "backend",
+			want:        "skillsetup-feature-user-auth-backend",
+		},
+		{
+			name:        "only project and feature",
+			template:    "{project}-{feature}",
+			featureName: "feature-reports",
+			serviceName: "frontend",
+			want:        "skillsetup-feature-reports",
+		},
+		{
+			name:        "no placeholders",
+			template:    "fixed-name",
+			featureName: "anything",
+			serviceName: "anything",
+			want:        "fixed-name",
+		},
+		{
+			name:        "service only",
+			template:    "{service}-svc",
+			featureName: "feature-x",
+			serviceName: "api",
+			want:        "api-svc",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := cfg.ReplaceComposeProjectPlaceholders(tt.template, tt.featureName, tt.serviceName)
+			if got != tt.want {
+				t.Errorf("ReplaceComposeProjectPlaceholders() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestReplaceInstancePlaceholder tests {instance} substitution in commands
+func TestReplaceInstancePlaceholder(t *testing.T) {
+	tests := []struct {
+		name     string
+		command  string
+		instance int
+		want     string
+	}{
+		{"simple replacement", "docker run -p {instance}:80 nginx", 3, "docker run -p 3:80 nginx"},
+		{"multiple occurrences", "{instance}-app-{instance}", 5, "5-app-5"},
+		{"no placeholder", "docker compose up -d", 2, "docker compose up -d"},
+		{"zero instance", "port-{instance}", 0, "port-0"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ReplaceInstancePlaceholder(tt.command, tt.instance)
+			if got != tt.want {
+				t.Errorf("ReplaceInstancePlaceholder(%q, %d) = %q, want %q", tt.command, tt.instance, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestGetClaudeWorkingProject tests Claude working directory project selection
+func TestGetClaudeWorkingProject(t *testing.T) {
+	t.Run("returns project marked as claude_working_dir", func(t *testing.T) {
+		cfg := &WorktreeConfig{
+			Projects: map[string]ProjectConfig{
+				"backend":  {Dir: "backend", ClaudeWorkingDir: false},
+				"frontend": {Dir: "frontend", ClaudeWorkingDir: true},
+			},
+		}
+		got := cfg.GetClaudeWorkingProject()
+		if got != "frontend" {
+			t.Errorf("GetClaudeWorkingProject() = %q, want %q", got, "frontend")
+		}
+	})
+
+	t.Run("returns any project when none marked", func(t *testing.T) {
+		cfg := &WorktreeConfig{
+			Projects: map[string]ProjectConfig{
+				"backend": {Dir: "backend"},
+			},
+		}
+		got := cfg.GetClaudeWorkingProject()
+		if got == "" {
+			t.Error("GetClaudeWorkingProject() returned empty string, expected a project name")
+		}
+	})
+
+	t.Run("returns empty for no projects", func(t *testing.T) {
+		cfg := &WorktreeConfig{Projects: map[string]ProjectConfig{}}
+		got := cfg.GetClaudeWorkingProject()
+		if got != "" {
+			t.Errorf("GetClaudeWorkingProject() = %q, want empty string", got)
+		}
+	})
+}
+
+// TestCalculateRelativePath tests relative path calculation
+func TestCalculateRelativePath(t *testing.T) {
+	tests := []struct {
+		name  string
+		depth int
+		want  string
+	}{
+		{"depth 0 returns dot", 0, "."},
+		{"negative depth returns dot", -1, "."},
+		{"depth 1 returns ..", 1, ".."},
+		{"depth 2 returns ../..", 2, "../.."},
+		{"depth 3 returns ../../..", 3, "../../.."},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := CalculateRelativePath(tt.depth)
+			if got != tt.want {
+				t.Errorf("CalculateRelativePath(%d) = %q, want %q", tt.depth, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestGenerateFiles tests file generation from templates
+func TestGenerateFiles(t *testing.T) {
+	t.Run("generates file with placeholder substitution", func(t *testing.T) {
+		featureDir := t.TempDir()
+		projectDir := filepath.Join(featureDir, "backend")
+		if err := os.MkdirAll(projectDir, 0755); err != nil {
+			t.Fatal(err)
+		}
+
+		cfg := &WorktreeConfig{
+			Projects: map[string]ProjectConfig{
+				"backend": {Dir: "backend"},
+			},
+			GeneratedFiles: map[string][]GeneratedFile{
+				"backend": {
+					{Path: ".env.local", Template: "PORT={BE_PORT}\nFEATURE={FEATURE_NAME}\n"},
+				},
+			},
+		}
+
+		envVars := map[string]string{
+			"BE_PORT":      "8081",
+			"FEATURE_NAME": "feature-test",
+		}
+
+		if err := cfg.GenerateFiles("backend", featureDir, envVars); err != nil {
+			t.Fatalf("GenerateFiles() error = %v", err)
+		}
+
+		data, err := os.ReadFile(filepath.Join(projectDir, ".env.local"))
+		if err != nil {
+			t.Fatalf("failed to read generated file: %v", err)
+		}
+
+		got := string(data)
+		want := "PORT=8081\nFEATURE=feature-test\n"
+		if got != want {
+			t.Errorf("generated file content = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("no-op when project has no generated files", func(t *testing.T) {
+		cfg := &WorktreeConfig{
+			Projects:       map[string]ProjectConfig{"backend": {Dir: "backend"}},
+			GeneratedFiles: map[string][]GeneratedFile{},
+		}
+		if err := cfg.GenerateFiles("backend", t.TempDir(), map[string]string{}); err != nil {
+			t.Errorf("GenerateFiles() for project with no files error = %v", err)
+		}
+	})
+
+	t.Run("returns error for nonexistent project", func(t *testing.T) {
+		cfg := &WorktreeConfig{
+			Projects: map[string]ProjectConfig{},
+			GeneratedFiles: map[string][]GeneratedFile{
+				"missing": {{Path: "file.txt", Template: "content"}},
+			},
+		}
+		err := cfg.GenerateFiles("missing", t.TempDir(), map[string]string{})
+		if err == nil {
+			t.Error("expected error for project not in Projects map")
+		}
+	})
+}
+
+// TestValidate_PortRangeAndDefaultPreset tests the remaining Validate branches
+func TestValidate_PortRangeAndDefaultPreset(t *testing.T) {
+	validBase := func() *WorktreeConfig {
+		return &WorktreeConfig{
+			Projects: map[string]ProjectConfig{
+				"backend": {Dir: "backend"},
+			},
+			Presets: map[string]PresetConfig{
+				"default": {Projects: []string{"backend"}},
+			},
+		}
+	}
+
+	t.Run("invalid port range: min out of 1-65535", func(t *testing.T) {
+		cfg := validBase()
+		r := [2]int{0, 100} // min=0 is invalid
+		cfg.EnvVariables = map[string]EnvVarConfig{
+			"FE_PORT": {Range: &r},
+		}
+		if err := cfg.Validate(); err == nil {
+			t.Error("expected error for port range with min=0")
+		}
+	})
+
+	t.Run("invalid port range: max out of 1-65535", func(t *testing.T) {
+		cfg := validBase()
+		r := [2]int{1000, 70000} // max=70000 is invalid
+		cfg.EnvVariables = map[string]EnvVarConfig{
+			"FE_PORT": {Range: &r},
+		}
+		if err := cfg.Validate(); err == nil {
+			t.Error("expected error for port range with max=70000")
+		}
+	})
+
+	t.Run("invalid port range: min >= max", func(t *testing.T) {
+		cfg := validBase()
+		r := [2]int{5000, 5000} // min == max is invalid
+		cfg.EnvVariables = map[string]EnvVarConfig{
+			"FE_PORT": {Range: &r},
+		}
+		if err := cfg.Validate(); err == nil {
+			t.Error("expected error for port range where min >= max")
+		}
+	})
+
+	t.Run("invalid port expression with range", func(t *testing.T) {
+		cfg := validBase()
+		r := [2]int{3000, 3100}
+		cfg.EnvVariables = map[string]EnvVarConfig{
+			"FE_PORT": {Port: "not-a-number", Range: &r},
+		}
+		if err := cfg.Validate(); err == nil {
+			t.Error("expected error for invalid port expression")
+		}
+	})
+
+	t.Run("default_preset nonexistent returns error", func(t *testing.T) {
+		cfg := validBase()
+		cfg.DefaultPreset = "nonexistent"
+		if err := cfg.Validate(); err == nil {
+			t.Error("expected error for nonexistent default_preset")
+		}
+	})
+
+	t.Run("default_preset matching preset is valid", func(t *testing.T) {
+		cfg := validBase()
+		cfg.DefaultPreset = "default"
+		if err := cfg.Validate(); err != nil {
+			t.Errorf("Validate() error = %v, want nil", err)
+		}
+	})
+
+	t.Run("valid port range passes", func(t *testing.T) {
+		cfg := validBase()
+		r := [2]int{3000, 3100}
+		cfg.EnvVariables = map[string]EnvVarConfig{
+			"FE_PORT": {Port: "3000 + {instance}", Range: &r},
+		}
+		if err := cfg.Validate(); err != nil {
+			t.Errorf("Validate() error = %v, want nil", err)
+		}
+	})
 }

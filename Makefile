@@ -1,4 +1,4 @@
-.PHONY: build install install-global install-user uninstall clean test help tidy fmt vet
+.PHONY: build install install-global install-user uninstall clean test test-system test-all help tidy fmt vet
 
 # Default target
 .DEFAULT_GOAL := help
@@ -64,9 +64,15 @@ clean: ## Remove built binary
 	@rm -f ./worktree
 	@echo "✅ Cleaned"
 
-test: ## Run tests
-	@echo "🧪 Running tests..."
+test: ## Run unit tests
+	@echo "🧪 Running unit tests..."
 	@go test -v ./...
+
+test-system: ## Run system/integration tests (builds binary, requires git)
+	@echo "🧪 Running system tests..."
+	@go test -v -timeout 120s ./test/system/...
+
+test-all: test test-system ## Run all tests (unit + system)
 
 tidy: ## Tidy go modules
 	@echo "📦 Tidying go modules..."

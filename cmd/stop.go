@@ -3,14 +3,41 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/braunmar/worktree/pkg/config"
 	"github.com/braunmar/worktree/pkg/docker"
+	"github.com/braunmar/worktree/pkg/process"
 	"github.com/braunmar/worktree/pkg/registry"
 	"github.com/braunmar/worktree/pkg/ui"
 
 	"github.com/spf13/cobra"
 )
+
+// buildStopEnvList builds the environment variable list needed for stop hooks.
+// Falls back to instance=0 if APP_PORT is not configured.
+func buildStopEnvList(workCfg *config.WorktreeConfig, wt *registry.Worktree, featureName string) []string {
+	instance := 0
+	if appPortCfg, ok := workCfg.EnvVariables["APP_PORT"]; ok && appPortCfg.Port != "" {
+		if basePort, err := config.ExtractBasePort(appPortCfg.Port); err == nil {
+			if appPort, ok := wt.Ports["APP_PORT"]; ok {
+				instance = appPort - basePort
+			}
+		}
+	}
+
+	baseEnvVars := workCfg.ExportEnvVars(instance)
+	baseEnvVars["FEATURE_NAME"] = featureName
+	for service, port := range wt.Ports {
+		baseEnvVars[service] = fmt.Sprintf("%d", port)
+	}
+
+	envList := os.Environ()
+	for key, value := range baseEnvVars {
+		envList = append(envList, fmt.Sprintf("%s=%s", key, value))
+	}
+	return envList
+}
 
 var stopCmd = &cobra.Command{
 	Use:   "stop [feature-name]",
@@ -82,34 +109,49 @@ func runStop(cmd *cobra.Command, args []string) {
 	ui.Info(fmt.Sprintf("Branch: %s", wt.Branch))
 	ui.NewLine()
 
-	// Check if feature is running
-	if !docker.IsFeatureRunning(workCfg.ProjectName, featureName) {
-		ui.Info(fmt.Sprintf("Feature '%s' is not running", featureName))
-		os.Exit(0)
-	}
-
 	// Get worktree path
 	featurePath := cfg.WorktreeFeaturePath(featureName)
 
-	// Build map of project directory to compose project name
-	projectInfo := make(map[string]string)
-	for _, projectName := range wt.Projects {
-		if projectCfg, exists := workCfg.Projects[projectName]; exists {
-			// Get the compose project name for this project from registry
-			composeName := wt.GetComposeProject(projectName)
-			if composeName == "" {
-				// Fallback to default naming if not in registry
-				composeName = fmt.Sprintf("%s-%s-%s", workCfg.ProjectName, featureName, projectName)
-			}
-			projectInfo[projectCfg.Dir] = composeName
-		}
-	}
+	// Build env for hooks
+	envList := buildStopEnvList(workCfg, wt, featureName)
 
-	// Stop feature services
+	// Stop each project according to its executor
 	ui.Loading("Stopping services...")
-	if err := docker.StopFeature(workCfg.ProjectName, featureName, featurePath, projectInfo); err != nil {
-		ui.Error(fmt.Sprintf("Failed to stop services: %v", err))
-		os.Exit(1)
+	for _, projectName := range wt.Projects {
+		project, exists := workCfg.Projects[projectName]
+		if !exists {
+			continue
+		}
+
+		worktreePath := featurePath + "/" + project.Dir
+		composeProject := wt.GetComposeProject(projectName)
+		if composeProject == "" {
+			composeProject = fmt.Sprintf("%s-%s-%s", workCfg.ProjectName, featureName, projectName)
+		}
+		projectEnv := append(envList, fmt.Sprintf("COMPOSE_PROJECT_NAME=%s", composeProject))
+
+		runHookCommand(fmt.Sprintf("%s: stop_pre_command", projectName), project.StopPreCommand, worktreePath, projectEnv)
+
+		switch project.GetExecutor() {
+		case "process":
+			pidFile := filepath.Join(featurePath, projectName+".pid")
+			if !process.IsRunning(pidFile) {
+				ui.Info(fmt.Sprintf("%s is not running", projectName))
+			} else if err := process.StopProcess(pidFile); err != nil {
+				ui.Warning(fmt.Sprintf("Failed to stop %s: %v", projectName, err))
+			}
+		default: // "docker"
+			if !docker.IsFeatureRunning(workCfg.ProjectName, featureName) {
+				ui.Info(fmt.Sprintf("%s is not running", projectName))
+			} else {
+				projectInfo := map[string]string{project.Dir: composeProject}
+				if err := docker.StopFeature(workCfg.ProjectName, featureName, featurePath, projectInfo); err != nil {
+					ui.Warning(fmt.Sprintf("Failed to stop %s: %v", projectName, err))
+				}
+			}
+		}
+
+		runHookCommand(fmt.Sprintf("%s: stop_post_command", projectName), project.StopPostCommand, worktreePath, projectEnv)
 	}
 
 	ui.NewLine()

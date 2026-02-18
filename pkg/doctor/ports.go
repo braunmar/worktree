@@ -29,7 +29,7 @@ func CheckPorts(reg *registry.Registry, workCfg *config.WorktreeConfig) PortRepo
 	// Check each allocated port against configured ranges
 	for port, alloc := range allocatedPorts {
 		// Find which service this port belongs to
-		portCfg, ok := workCfg.Ports[alloc.Service]
+		portCfg, ok := workCfg.EnvVariables[alloc.Service]
 		if !ok {
 			continue // Service not in config (might be custom)
 		}
@@ -56,7 +56,7 @@ func CheckPorts(reg *registry.Registry, workCfg *config.WorktreeConfig) PortRepo
 	}
 
 	// Calculate port range statistics
-	for serviceName, portCfg := range workCfg.Ports {
+	for serviceName, portCfg := range workCfg.EnvVariables {
 		if portCfg.Range == nil {
 			continue // Skip services without explicit ranges
 		}

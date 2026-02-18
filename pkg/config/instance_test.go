@@ -236,3 +236,98 @@ func TestRemoveInstanceMarker(t *testing.T) {
 		t.Fatalf("RemoveInstanceMarker should not error when file doesn't exist: %v", err)
 	}
 }
+
+func TestLoadInstanceMarkerInvalidJSON(t *testing.T) {
+	dir := t.TempDir()
+	markerPath := filepath.Join(dir, instanceMarkerFile)
+	if err := os.WriteFile(markerPath, []byte("{not valid json"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := loadInstanceMarker(markerPath)
+	if err == nil {
+		t.Error("expected error for invalid JSON instance marker")
+	}
+}
+
+func TestLoadInstanceMarkerMissingFile(t *testing.T) {
+	_, err := loadInstanceMarker("/nonexistent/path/.worktree-instance")
+	if err == nil {
+		t.Error("expected error when marker file does not exist")
+	}
+}
+
+func TestRemoveInstanceMarkerNonexistentDir(t *testing.T) {
+	// RemoveInstanceMarker on a path where the file never existed should be a no-op
+	err := RemoveInstanceMarker("/tmp/worktree-test-nonexistent-dir")
+	if err != nil {
+		t.Errorf("RemoveInstanceMarker on missing file should return nil, got: %v", err)
+	}
+}
+
+func TestUpdateInstanceYoloModeMissingMarker(t *testing.T) {
+	err := UpdateInstanceYoloMode("/tmp/worktree-test-nonexistent", true)
+	if err == nil {
+		t.Error("expected error when marker file does not exist")
+	}
+}
+
+func TestDetectInstanceFromDirDeepNesting(t *testing.T) {
+	tmpDir := t.TempDir()
+	featureDir := filepath.Join(tmpDir, "worktrees", "feature-deep")
+	deepDir := filepath.Join(featureDir, "backend", "src", "handlers", "user")
+	if err := os.MkdirAll(deepDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := WriteInstanceMarker(featureDir, "feature-deep", 1, "/root", []string{"backend"}, map[string]int{"APP_PORT": 8081}, false); err != nil {
+		t.Fatal(err)
+	}
+
+	// Detect from 4 levels deep
+	ctx, err := detectInstanceFromDir(deepDir)
+	if err != nil {
+		t.Fatalf("detectInstanceFromDir() error = %v", err)
+	}
+	if ctx.Feature != "feature-deep" {
+		t.Errorf("Feature = %q, want %q", ctx.Feature, "feature-deep")
+	}
+}
+
+func TestWriteInstanceMarkerFields(t *testing.T) {
+	dir := t.TempDir()
+	ports := map[string]int{"APP_PORT": 8082, "FE_PORT": 3002}
+	projects := []string{"backend", "frontend"}
+
+	if err := WriteInstanceMarker(dir, "feature-fields", 2, "/project/root", projects, ports, true); err != nil {
+		t.Fatalf("WriteInstanceMarker() error = %v", err)
+	}
+
+	markerPath := filepath.Join(dir, instanceMarkerFile)
+	ctx, err := loadInstanceMarker(markerPath)
+	if err != nil {
+		t.Fatalf("loadInstanceMarker() error = %v", err)
+	}
+
+	if ctx.Instance != 2 {
+		t.Errorf("Instance = %d, want 2", ctx.Instance)
+	}
+	if ctx.ProjectRoot != "/project/root" {
+		t.Errorf("ProjectRoot = %q, want %q", ctx.ProjectRoot, "/project/root")
+	}
+	if ctx.WorktreeRoot != dir {
+		t.Errorf("WorktreeRoot = %q, want %q", ctx.WorktreeRoot, dir)
+	}
+	if !ctx.YoloMode {
+		t.Error("YoloMode should be true")
+	}
+	if ctx.CreatedAt == "" {
+		t.Error("CreatedAt should not be empty")
+	}
+	if ctx.Ports["APP_PORT"] != 8082 {
+		t.Errorf("APP_PORT = %d, want 8082", ctx.Ports["APP_PORT"])
+	}
+	if ctx.Ports["FE_PORT"] != 3002 {
+		t.Errorf("FE_PORT = %d, want 3002", ctx.Ports["FE_PORT"])
+	}
+}
