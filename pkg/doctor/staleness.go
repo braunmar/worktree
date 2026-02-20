@@ -2,13 +2,13 @@ package doctor
 
 import (
 	"bytes"
+	"github.com/braunmar/worktree/pkg/config"
+	"github.com/braunmar/worktree/pkg/docker"
+	"github.com/braunmar/worktree/pkg/registry"
 	"os"
 	"os/exec"
 	"strings"
 	"time"
-	"github.com/braunmar/worktree/pkg/config"
-	"github.com/braunmar/worktree/pkg/docker"
-	"github.com/braunmar/worktree/pkg/registry"
 )
 
 // CheckStaleness checks if a worktree is stale based on multiple criteria

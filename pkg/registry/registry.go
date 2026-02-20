@@ -3,6 +3,7 @@ package registry
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/braunmar/worktree/pkg/config"
 	"net"
 	"os"
 	"path/filepath"
@@ -10,7 +11,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-	"github.com/braunmar/worktree/pkg/config"
 )
 
 const (

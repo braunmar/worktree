@@ -13,14 +13,14 @@ const instanceMarkerFile = ".worktree-instance"
 
 // InstanceContext represents the worktree instance metadata
 type InstanceContext struct {
-	Feature      string            `json:"feature"`
-	Instance     int               `json:"instance"`
-	ProjectRoot  string            `json:"project_root"`
-	WorktreeRoot string            `json:"worktree_root"`
-	Projects     []string          `json:"projects"`
-	Ports        map[string]int    `json:"ports"`
-	YoloMode     bool              `json:"yolo_mode"`
-	CreatedAt    string            `json:"created_at"`
+	Feature      string         `json:"feature"`
+	Instance     int            `json:"instance"`
+	ProjectRoot  string         `json:"project_root"`
+	WorktreeRoot string         `json:"worktree_root"`
+	Projects     []string       `json:"projects"`
+	Ports        map[string]int `json:"ports"`
+	YoloMode     bool           `json:"yolo_mode"`
+	CreatedAt    string         `json:"created_at"`
 }
 
 // DetectInstance walks up from the current working directory to find .worktree-instance

@@ -30,7 +30,7 @@ func ListAgentSessions() ([]string, error) {
 	if err != nil {
 		// tmux returns error if no sessions exist
 		if strings.Contains(err.Error(), "no server running") ||
-		   strings.Contains(err.Error(), "no sessions") {
+			strings.Contains(err.Error(), "no sessions") {
 			return []string{}, nil
 		}
 		return nil, fmt.Errorf("failed to list sessions: %w", err)

@@ -33,27 +33,27 @@ type WorktreeConfig struct {
 
 // EnvVarConfig represents an environment variable configuration entry (port, string template, or display-only)
 type EnvVarConfig struct {
-	Name  string   `yaml:"name"`
-	URL   string   `yaml:"url"`
-	Port  string   `yaml:"port"`  // Expression like "3000 + {instance}" or null for non-port configs
-	Value string   `yaml:"value"` // String template for non-port configs like COMPOSE_PROJECT_NAME
-	Env   string   `yaml:"env"`   // Environment variable name to export
-	Range *[2]int  `yaml:"range"` // Optional explicit range [min, max] for port allocation
+	Name  string  `yaml:"name"`
+	URL   string  `yaml:"url"`
+	Port  string  `yaml:"port"`  // Expression like "3000 + {instance}" or null for non-port configs
+	Value string  `yaml:"value"` // String template for non-port configs like COMPOSE_PROJECT_NAME
+	Env   string  `yaml:"env"`   // Environment variable name to export
+	Range *[2]int `yaml:"range"` // Optional explicit range [min, max] for port allocation
 }
 
 // ProjectConfig represents a single project configuration
 type ProjectConfig struct {
-	Executor            string `yaml:"executor"`            // "docker" (default) or "process"
-	Dir                 string `yaml:"dir"`
-	MainBranch          string `yaml:"main_branch"`
-	StartPreCommand     string `yaml:"start_pre_command"`  // Runs before start_command
-	StartCommand        string `yaml:"start_command"`
-	StartPostCommand    string `yaml:"start_post_command"` // Runs after start_command (fixtures, seed, etc.)
-	StopPreCommand      string `yaml:"stop_pre_command"`   // Runs before stopping services
-	StopPostCommand     string `yaml:"stop_post_command"`  // Runs after stopping services
-	RestartPreCommand   string `yaml:"restart_pre_command"`  // Runs before the full restart cycle
-	RestartPostCommand  string `yaml:"restart_post_command"` // Runs after the full restart cycle
-	ClaudeWorkingDir    bool   `yaml:"claude_working_dir"`
+	Executor           string `yaml:"executor"` // "docker" (default) or "process"
+	Dir                string `yaml:"dir"`
+	MainBranch         string `yaml:"main_branch"`
+	StartPreCommand    string `yaml:"start_pre_command"` // Runs before start_command
+	StartCommand       string `yaml:"start_command"`
+	StartPostCommand   string `yaml:"start_post_command"`   // Runs after start_command (fixtures, seed, etc.)
+	StopPreCommand     string `yaml:"stop_pre_command"`     // Runs before stopping services
+	StopPostCommand    string `yaml:"stop_post_command"`    // Runs after stopping services
+	RestartPreCommand  string `yaml:"restart_pre_command"`  // Runs before the full restart cycle
+	RestartPostCommand string `yaml:"restart_post_command"` // Runs after the full restart cycle
+	ClaudeWorkingDir   bool   `yaml:"claude_working_dir"`
 }
 
 // GetExecutor returns the executor type, defaulting to "docker" if not set.

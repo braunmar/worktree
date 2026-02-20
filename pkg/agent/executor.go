@@ -103,8 +103,8 @@ func (e *Executor) executeSteps() error {
 			}
 		case "skill":
 			if err := e.executeSkillStep(step); err != nil {
-			return fmt.Errorf("step '%s' failed: %w", step.Name, err)
-		}
+				return fmt.Errorf("step '%s' failed: %w", step.Name, err)
+			}
 		default:
 			return fmt.Errorf("unknown step type: %s", step.Type)
 		}
@@ -428,11 +428,11 @@ func (e *Executor) sendSlackNotification(notification config.Notification, succe
 	payload := map[string]interface{}{
 		"attachments": []map[string]interface{}{
 			{
-				"color":      color,
-				"text":       message,
-				"footer":     "Worktree Agent Scheduler",
+				"color":       color,
+				"text":        message,
+				"footer":      "Worktree Agent Scheduler",
 				"footer_icon": "⚙️",
-				"ts":         time.Now().Unix(),
+				"ts":          time.Now().Unix(),
 			},
 		},
 	}

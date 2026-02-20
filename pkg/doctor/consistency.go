@@ -1,10 +1,10 @@
 package doctor
 
 import (
-	"os"
 	"github.com/braunmar/worktree/pkg/config"
 	"github.com/braunmar/worktree/pkg/docker"
 	"github.com/braunmar/worktree/pkg/registry"
+	"os"
 )
 
 // CheckConsistency checks for mismatches between registry, directories, and containers

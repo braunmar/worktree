@@ -3,8 +3,8 @@ package doctor
 import (
 	"encoding/json"
 	"fmt"
-	"strings"
 	"github.com/braunmar/worktree/pkg/ui"
+	"strings"
 )
 
 // Print outputs the report in human-readable format

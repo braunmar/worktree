@@ -2,9 +2,9 @@ package doctor
 
 import (
 	"fmt"
-	"net"
 	"github.com/braunmar/worktree/pkg/config"
 	"github.com/braunmar/worktree/pkg/registry"
+	"net"
 )
 
 // CheckPorts checks port allocations for conflicts and range violations

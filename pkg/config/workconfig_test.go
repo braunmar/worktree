@@ -565,7 +565,7 @@ func TestExportEnvVars(t *testing.T) {
 // TestExportEnvVars_InstanceAlwaysPresent verifies INSTANCE is always exported
 func TestExportEnvVars_InstanceAlwaysPresent(t *testing.T) {
 	configs := []*WorktreeConfig{
-		{},                               // Empty config
+		{}, // Empty config
 		{EnvVariables: map[string]EnvVarConfig{}}, // Empty ports
 		{EnvVariables: map[string]EnvVarConfig{
 			"FE_PORT": {Port: "3000", Env: "FE_PORT"},
@@ -1152,9 +1152,9 @@ func TestGetPortServiceNames(t *testing.T) {
 		EnvVariables: map[string]EnvVarConfig{
 			"FE_PORT": {Env: "FE_PORT", Range: &r1},
 			"BE_PORT": {Env: "BE_PORT", Range: &r2},
-			"CALC":    {Env: "CALC", Port: "9000 + {instance}"},  // no Range - excluded
-			"NOENV":   {Range: &r1},                               // no Env - excluded
-			"TMPL":    {Env: "TMPL", Value: "proj-{instance}"},   // value only - excluded
+			"CALC":    {Env: "CALC", Port: "9000 + {instance}"}, // no Range - excluded
+			"NOENV":   {Range: &r1},                             // no Env - excluded
+			"TMPL":    {Env: "TMPL", Value: "proj-{instance}"},  // value only - excluded
 		},
 	}
 

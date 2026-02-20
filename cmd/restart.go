@@ -3,8 +3,12 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"os/exec"
+	"path/filepath"
 
 	"github.com/braunmar/worktree/pkg/config"
+	"github.com/braunmar/worktree/pkg/docker"
+	"github.com/braunmar/worktree/pkg/process"
 	"github.com/braunmar/worktree/pkg/registry"
 	"github.com/braunmar/worktree/pkg/ui"
 
@@ -16,11 +20,15 @@ var restartCmd = &cobra.Command{
 	Short: "Restart services for a feature worktree",
 	Long: `Restart services for a specific feature worktree.
 
-This command:
+This command runs ONLY restart hooks (not start/stop hooks):
 1. Runs restart_pre_command for each project (if configured)
-2. Stops all running services (including stop_pre/post hooks)
-3. Starts all services again (including start_pre/post hooks)
+2. Stops services (NO stop_pre/post_command)
+3. Starts services (NO start_pre/post_command)
 4. Runs restart_post_command for each project (if configured)
+
+Use restart_pre/post_command for restart-specific operations:
+- restart_pre_command: backup state, drain connections, etc.
+- restart_post_command: verify health, warm caches, etc.
 
 This is useful when:
 - Configuration has changed
@@ -55,7 +63,7 @@ func runRestart(cmd *cobra.Command, args []string) {
 	ui.Warning(fmt.Sprintf("Restarting Feature: %s", featureName))
 	ui.NewLine()
 
-	// Load config to run restart_pre/post hooks
+	// Load config
 	cfg, err := config.New()
 	checkError(err)
 	workCfg, err := config.LoadWorktreeConfig(cfg.ProjectRoot)
@@ -70,9 +78,29 @@ func runRestart(cmd *cobra.Command, args []string) {
 	}
 
 	featureDir := cfg.WorktreeFeaturePath(featureName)
-	envList := buildStopEnvList(workCfg, wt, featureName)
 
-	// Restart pre-hooks (per project, before stop)
+	// Build environment variables
+	instance := 0
+	if appPortCfg, ok := workCfg.EnvVariables["APP_PORT"]; ok && appPortCfg.Port != "" {
+		if basePort, err := config.ExtractBasePort(appPortCfg.Port); err == nil {
+			if appPort, ok := wt.Ports["APP_PORT"]; ok {
+				instance = appPort - basePort
+			}
+		}
+	}
+
+	baseEnvVars := workCfg.ExportEnvVars(instance)
+	baseEnvVars["FEATURE_NAME"] = featureName
+	for service, port := range wt.Ports {
+		baseEnvVars[service] = fmt.Sprintf("%d", port)
+	}
+
+	envList := os.Environ()
+	for key, value := range baseEnvVars {
+		envList = append(envList, fmt.Sprintf("%s=%s", key, value))
+	}
+
+	// Phase 1: restart_pre_command for each project
 	for _, projectName := range wt.Projects {
 		if project, ok := workCfg.Projects[projectName]; ok {
 			worktreePath := featureDir + "/" + project.Dir
@@ -82,19 +110,74 @@ func runRestart(cmd *cobra.Command, args []string) {
 		}
 	}
 
-	// Stop (includes stop_pre/post hooks)
-	ui.Info("Stopping services...")
-	runStop(cmd, []string{featureName})
+	// Phase 2: Stop services (NO stop_pre/post hooks)
+	ui.Loading("Stopping services...")
+	for _, projectName := range wt.Projects {
+		project, exists := workCfg.Projects[projectName]
+		if !exists {
+			continue
+		}
 
+		composeProject := wt.GetComposeProject(projectName)
+		if composeProject == "" {
+			composeProject = fmt.Sprintf("%s-%s-%s", workCfg.ProjectName, featureName, projectName)
+		}
+
+		switch project.GetExecutor() {
+		case "process":
+			pidFile := filepath.Join(featureDir, projectName+".pid")
+			if process.IsRunning(pidFile) {
+				if err := process.StopProcess(pidFile); err != nil {
+					ui.Warning(fmt.Sprintf("Failed to stop %s: %v", projectName, err))
+				}
+			}
+		default: // "docker"
+			if docker.IsFeatureRunning(workCfg.ProjectName, featureName) {
+				projectInfo := map[string]string{project.Dir: composeProject}
+				if err := docker.StopFeature(workCfg.ProjectName, featureName, featureDir, projectInfo); err != nil {
+					ui.Warning(fmt.Sprintf("Failed to stop %s: %v", projectName, err))
+				}
+			}
+		}
+	}
 	ui.NewLine()
 
-	// Start (includes start_pre/post hooks)
-	ui.Info("Starting services...")
-	runStart(cmd, []string{featureName})
+	// Phase 3: Start services (NO start_pre/post hooks)
+	ui.Loading("Starting services...")
+	for _, projectName := range wt.Projects {
+		project := workCfg.Projects[projectName]
+		worktreePath := featureDir + "/" + project.Dir
 
+		// Build environment with COMPOSE_PROJECT_NAME
+		projectEnvList := os.Environ()
+		for key, value := range baseEnvVars {
+			projectEnvList = append(projectEnvList, fmt.Sprintf("%s=%s", key, value))
+		}
+		composeProject := wt.GetComposeProject(projectName)
+		projectEnvList = append(projectEnvList, fmt.Sprintf("COMPOSE_PROJECT_NAME=%s", composeProject))
+
+		// Start service
+		var startErr error
+		switch project.GetExecutor() {
+		case "process":
+			pidFile := filepath.Join(featureDir, projectName+".pid")
+			startErr = process.StartBackground(projectName, project.StartCommand, worktreePath, projectEnvList, pidFile)
+		default: // "docker"
+			shellCmd := exec.Command("sh", "-c", project.StartCommand)
+			shellCmd.Dir = worktreePath
+			shellCmd.Env = projectEnvList
+			shellCmd.Stdout = os.Stdout
+			shellCmd.Stderr = os.Stderr
+			startErr = shellCmd.Run()
+		}
+		if startErr != nil {
+			ui.Error(fmt.Sprintf("Failed to start %s: %v", projectName, startErr))
+			os.Exit(1)
+		}
+	}
 	ui.NewLine()
 
-	// Restart post-hooks (per project, after start)
+	// Phase 4: restart_post_command for each project
 	for _, projectName := range wt.Projects {
 		if project, ok := workCfg.Projects[projectName]; ok {
 			worktreePath := featureDir + "/" + project.Dir

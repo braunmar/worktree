@@ -1,0 +1,650 @@
+# Worktree Manager Configuration
+# Configure how worktrees are created and managed for this project
+
+# Project namespace/prefix for Docker containers and services (default: skillsetup)
+# Used in container naming: {project_name}-{feature}-{service}
+# Only alphanumeric characters and hyphens allowed
+project_name: "Example"
+
+# Hostname for service URLs (default: localhost)
+# Change this for remote development or when using custom hostnames
+hostname: localhost
+
+# Project definitions
+projects:
+  backend:
+    dir: backend
+    main_branch: main
+    # Command to start services (environment variables set by worktree manager from registry)
+    start_command: "make up-dev"
+    # Post-startup command (migrations + fixtures)
+    start_post_command: "make dev-clear-fixture-force"
+    # Working directory for Claude (where to cd after setup)
+    claude_working_dir: false
+
+  frontend:
+    dir: frontend
+    main_branch: main
+    start_command: "make up-docker"
+    start_post_command: "npm install" # so IDE will work correctly
+    # No fixtures or migrations for frontend
+    claude_working_dir: false
+
+  web:
+    dir: web
+    main_branch: main
+    start_command: "make up"
+    claude_working_dir: false
+
+# Preset configurations for quick setup
+presets:
+  # Full-stack development (backend + frontend)
+  fullstack:
+    projects: [backend, frontend]
+    description: "Backend API + Frontend UI"
+
+  # Backend only
+  backend:
+    projects: [backend]
+    description: "Backend API only"
+
+  # Frontend only
+  frontend:
+    projects: [frontend]
+    description: "Frontend UI only"
+
+  # All projects
+  all:
+    projects: [backend, frontend, web]
+    description: "All projects (backend, frontend, web)"
+
+# Default preset to use if not specified
+default_preset: fullstack
+
+# Automatic fixture loading (can be overridden with --no-fixtures)
+auto_fixtures: true
+
+# Files/directories to symlink from project root into each worktree
+# Useful for sharing configuration across all feature worktrees
+symlinks:
+  - source: ".claude"
+    target: ".claude"
+
+# Files/directories to copy from project root into each worktree (optional)
+# Useful for template files that should be customized per worktree
+# copies:
+#   - source: ".env.template"
+#     target: ".env"
+
+# Environment variable configuration (single source of truth)
+# All env vars exported to start_command and start_post_command are defined here.
+# IMPORTANT: Entries that need port allocation must define a 'range' field.
+env_variables:
+  # Frontend ports
+  FE_PORT:
+    name: "Frontend"
+    url: "http://{host}:{port}"
+    port: "3000"                        # Base port (range takes precedence)
+    env: "FE_PORT"                      # Export as FE_PORT env var
+    range: [3000, 3100]                 # Port allocation range
+
+  # Backend ports
+  BE_PORT:
+    name: "Backend API"
+    url: "http://{host}:{port}"
+    port: "8080"                        # Base port (range takes precedence)
+    env: "BE_PORT"
+    range: [8080, 8180]                 # Port allocation range
+
+  APP_PORT:                              # Same as BE_PORT (alias for backend)
+    name: null                           # Don't display (duplicate)
+    url: null
+    port: "8080"                        # Base port (range takes precedence)
+    env: "APP_PORT"
+    range: [8080, 8180]                 # Port allocation range
+
+  # Database
+  POSTGRES_PORT:
+    name: "PostgreSQL"
+    url: "{host}:{port}"
+    port: "5432"                        # Base port (range takes precedence)
+    env: "POSTGRES_PORT"
+    range: [5432, 5532]                 # Port allocation range
+
+  # Mail testing
+  MAILPIT_SMTP_PORT:
+    name: null                           # Don't display
+    url: null
+    port: "1025"                        # Base port (range takes precedence)
+    env: "MAILPIT_SMTP_PORT"
+    range: [1025, 1125]                 # Port allocation range
+
+  MAILPIT_UI_PORT:
+    name: "Mailpit UI"
+    url: "http://{host}:{port}"
+    port: "8025"                        # Base port (range takes precedence)
+    env: "MAILPIT_UI_PORT"
+    range: [8025, 8125]                 # Port allocation range
+
+  # AWS LocalStack
+  LOCALSTACK_PORT:
+    name: "LocalStack"
+    url: "http://{host}:{port}"
+    port: "5566"                        # Base port (range takes precedence)
+    env: "LOCALSTACK_PORT"
+    range: [5566, 5666]                 # Port allocation range (above all EXT ranges)
+
+  # LocalStack external port range (calculated from INSTANCE, not allocated)
+  # For instance N: START = 4510 + (N * 50), END = 4559 + (N * 50)
+  # These use port expressions with {instance} placeholder for automatic calculation
+  LOCALSTACK_EXT_START:
+    name: null
+    url: null
+    port: "4510 + {instance} * 50"     # Calculated from INSTANCE
+    env: "LOCALSTACK_EXT_START"
+    # NO RANGE - not allocated, only calculated
+
+  LOCALSTACK_EXT_END:
+    name: null
+    url: null
+    port: "4559 + {instance} * 50"     # Calculated from INSTANCE
+    env: "LOCALSTACK_EXT_END"
+    # NO RANGE - not allocated, only calculated
+
+  # Docker Compose
+  COMPOSE_PROJECT_NAME:
+    name: null
+    url: null
+    port: null                           # Not a port
+    value: "{project}-{feature}-{service}" # Dynamically set to {project_name}-{feature-name}-{service-name}
+    env: "COMPOSE_PROJECT_NAME"
+
+  # API docs (display only)
+  swagger:
+    name: "Swagger"
+    url: "http://{host}:{port}/docs/api/index.html"
+    port: "8080"                        # Base port (uses BE_PORT)
+    env: null                            # Don't export (use BE_PORT)
+
+  # React environment variables (for frontend)
+  REACT_APP_API_BASE_URL:
+    name: null
+    url: null
+    port: null                           # Not a port number
+    value: "http://localhost:{BE_PORT}"  # Template that uses BE_PORT placeholder
+    env: "REACT_APP_API_BASE_URL"
+
+  GOOGLE_OAUTH_REDIRECT_URI:
+    name: "Google OAuth Redirect URI"
+    url: null
+    port: null                           # Not a port number
+    value: "http://localhost:{FE_PORT}/oauth/callback/google"
+    env: "GOOGLE_OAUTH_REDIRECT_URI"
+
+  OUTLOOK_OAUTH_REDIRECT_URI:
+    name: "Outlook OAuth Redirect URI"
+    url: null
+    port: null                           # Not a port number
+    value: "http://localhost:{FE_PORT}/oauth/callback/outlook"
+    env: "OUTLOOK_OAUTH_REDIRECT_URI"
+
+  EMAIL_BASE_URL:
+    name: "Email Base URL"
+    url: null
+    port: null                           # Not a port number
+    value: "http://localhost:{FE_PORT}"
+    env: "EMAIL_BASE_URL"
+
+  SECURITY_BASE_URL:
+    name: "Security Base URL"
+    url: null
+    port: null                           # Not a port number
+    value: "http://localhost:{BE_PORT}"
+    env: "SECURITY_BASE_URL"
+
+# Generated files (auto-created/updated by worktree manager in each worktree)
+# These files are created with templated content that uses port placeholders
+generated_files:
+  frontend:
+    - path: ".env.development.local"
+      template: |
+        # Auto-generated by worktree manager - DO NOT EDIT MANUALLY
+        # This file will be regenerated when the worktree is started
+        REACT_APP_API_BASE_URL=http://localhost:{BE_PORT}
+        WDS_SOCKET_PORT={FE_PORT}
+
+# Scheduled agent tasks (automated maintenance)
+scheduled_agents:
+  test-agent:
+    name: "Test Agent (Phase 1)"
+    description: "Simple test agent for Phase 1 - shell steps only"
+    schedule: "* * * * *"  # Every minute (for testing)
+
+    context:
+      preset: backend
+      branch: main
+      instance: 90
+      yolo: true
+
+    steps:
+      - name: hello-world
+        type: shell
+        command: "echo 'Hello from test agent!'"
+
+      - name: show-date
+        type: shell
+        command: "date"
+
+      - name: list-directory
+        type: shell
+        command: "ls -la"
+
+    safety:
+      gates: []
+      git:
+        branch: "automated/test-agent"
+        commit_message: "chore: test agent execution"
+        push:
+          enabled: false
+      rollback:
+        enabled: true
+        strategy: "cleanup-worktree"
+
+    notifications:
+      on_failure: []
+
+  # Production agents
+  npm-audit:
+    name: "NPM Security Audit & Fix"
+    description: "Check and fix npm vulnerabilities in frontend"
+    schedule: "0 9 * * MON"  # Every Monday at 9 AM
+
+    context:
+      preset: frontend
+      branch: main
+      instance: 91
+      yolo: true
+
+    steps:
+      - name: "Run npm audit fix"
+        type: shell
+        command: "npm audit fix --audit-level=moderate"
+        working_dir: "frontend"
+
+      - name: "Update package-lock.json"
+        type: shell
+        command: "npm install"
+        working_dir: "frontend"
+
+    safety:
+      gates:
+        - name: "Lint check"
+          command: "cd frontend && npm run lint"
+          required: true
+        - name: "Build check"
+          command: "cd frontend && npm run build"
+          required: true
+        - name: "Unit tests"
+          command: "cd frontend && npm test -- --watchAll=false"
+          required: false
+
+      git:
+        branch: "automated/npm-audit-{date}"
+        commit_message: |
+          chore: npm audit fix
+
+          Automated security fixes from npm audit.
+
+          Co-Authored-By: Worktree Manager Agent <noreply@skillsetup.com>
+        push:
+          enabled: true
+          create_pr: true
+          pr_title: "Security: NPM Audit Fixes ({date})"
+          pr_body: |
+            ## Automated NPM Audit Fixes
+
+            This PR contains automated security fixes from `npm audit fix`.
+
+            ### Changes
+            - Security vulnerabilities fixed
+            - Dependencies updated
+
+            ### Quality Gates
+            - ✅ Lint check passed
+            - ✅ Build check passed
+            - ⚠️ Unit tests (optional)
+
+            **Review and merge if all checks pass.**
+          auto_merge: false
+
+      rollback:
+        enabled: true
+        strategy: "cleanup-worktree"
+
+    notifications:
+      on_success:
+        - type: slack
+          title: "#engineering"
+          body: |
+            ✅ *NPM Security Audit* completed successfully!
+
+            All security fixes applied. PR created for review.
+
+            Task: {task}
+            Date: {date}
+          recipients:
+            - "${SLACK_WEBHOOK_URL}"  # Set via environment variable
+
+      on_failure:
+        - type: slack
+          title: "#alerts"
+          body: |
+            🚨 *NPM Security Audit* FAILED!
+
+            Manual intervention required immediately.
+
+            Task: {task}
+            Date: {date}
+          recipients:
+            - "${SLACK_WEBHOOK_URL}"  # Set via environment variable
+
+  go-deps-update:
+    name: "Go Dependencies Update"
+    description: "Update Go dependencies in backend"
+    schedule: "0 10 * * MON"  # Every Monday at 10 AM
+
+    context:
+      preset: backend
+      branch: main
+      instance: 92
+      yolo: true
+
+    steps:
+      - name: "Update Go dependencies"
+        type: shell
+        command: "go get -u ./... && go mod tidy"
+        working_dir: "backend"
+
+      - name: "Verify dependencies"
+        type: shell
+        command: "go mod verify"
+        working_dir: "backend"
+
+    safety:
+      gates:
+        - name: "Go vet"
+          command: "cd backend && go vet ./..."
+          required: true
+        - name: "Unit tests"
+          command: "cd backend && make test-unit"
+          required: true
+        - name: "Integration tests"
+          command: "cd backend && make test-integration"
+          required: true
+
+      git:
+        branch: "automated/go-deps-update-{date}"
+        commit_message: |
+          chore: update Go dependencies
+
+          Automated dependency updates.
+
+          Co-Authored-By: Worktree Manager Agent <noreply@skillsetup.com>
+        push:
+          enabled: true
+          create_pr: true
+          pr_title: "Dependencies: Go Dependencies Update ({date})"
+          pr_body: |
+            ## Automated Go Dependencies Update
+
+            This PR contains automated updates to Go dependencies.
+
+            ### Changes
+            - Go dependencies updated via `go get -u ./...`
+            - go.mod and go.sum updated
+
+            ### Quality Gates
+            - ✅ Go vet passed
+            - ✅ Unit tests passed
+            - ✅ Integration tests passed
+
+            **Review and merge if all checks pass.**
+          auto_merge: false
+
+      rollback:
+        enabled: true
+        strategy: "cleanup-worktree"
+
+    notifications:
+      on_success:
+        - type: slack
+          title: "#engineering"
+          body: "✅ Go dependencies updated successfully - PR created"
+          recipients:
+            - "${SLACK_WEBHOOK_URL}"
+
+      on_failure:
+        - type: slack
+          title: "#alerts"
+          body: "❌ Go dependencies update failed - check logs"
+          recipients:
+            - "${SLACK_WEBHOOK_URL}"
+
+  go-version-upgrade:
+    name: "Go Version Upgrade"
+    description: "Upgrade Go version across all projects and infrastructure"
+    schedule: "0 11 1 * *"  # First day of month at 11 AM
+
+    context:
+      preset: all
+      branch: main
+      instance: 93
+      yolo: true
+
+    steps:
+      - name: "Check latest Go version"
+        type: shell
+        command: |
+          LATEST=$(curl -s https://go.dev/VERSION?m=text | head -1 | sed 's/go//')
+          echo "Latest Go version: $LATEST"
+          echo "$LATEST" > /tmp/go-latest-version.txt
+
+      - name: "Update backend go.mod"
+        type: shell
+        command: |
+          LATEST=$(cat /tmp/go-latest-version.txt)
+          sed -i '' "s/^go .*/go $LATEST/" backend/go.mod
+
+      - name: "Update backend Dockerfile"
+        type: shell
+        command: |
+          LATEST=$(cat /tmp/go-latest-version.txt)
+          find backend -name "Dockerfile*" -exec sed -i '' "s/golang:[0-9.]\+/golang:$LATEST/" {} \;
+
+      - name: "Update docker-compose files"
+        type: shell
+        command: |
+          LATEST=$(cat /tmp/go-latest-version.txt)
+          find . -name "docker-compose*.yml" -exec sed -i '' "s/golang:[0-9.]\+/golang:$LATEST/" {} \;
+
+      - name: "Update GitHub Actions"
+        type: shell
+        command: |
+          LATEST=$(cat /tmp/go-latest-version.txt)
+          find .github/workflows -name "*.yml" -exec sed -i '' "s/go-version: '[0-9.]\+'/go-version: '$LATEST'/" {} \;
+
+      - name: "Update tools (worktree-manager, etc.)"
+        type: shell
+        command: |
+          LATEST=$(cat /tmp/go-latest-version.txt)
+          find tools -name "go.mod" -exec sed -i '' "s/^go .*/go $LATEST/" {} \;
+          find tools -name "Dockerfile*" -exec sed -i '' "s/golang:[0-9.]\+/golang:$LATEST/" {} \;
+
+      - name: "Clean up temp file"
+        type: shell
+        command: "rm -f /tmp/go-latest-version.txt"
+
+    safety:
+      gates:
+        - name: "Backend build"
+          command: "cd backend && go build ./..."
+          required: true
+        - name: "Backend tests"
+          command: "cd backend && make test"
+          required: true
+        - name: "Tools build"
+          command: "cd tools/worktree-manager && go build"
+          required: true
+
+      git:
+        branch: "automated/go-version-upgrade-{date}"
+        commit_message: |
+          chore: upgrade Go version to latest
+
+          Automated Go version upgrade across:
+          - Backend go.mod
+          - Dockerfiles
+          - docker-compose files
+          - GitHub Actions workflows
+          - Tools (worktree-manager, etc.)
+
+          Co-Authored-By: Worktree Manager Agent <noreply@skillsetup.com>
+        push:
+          enabled: true
+          create_pr: true
+          pr_title: "Infrastructure: Go Version Upgrade ({date})"
+          pr_body: |
+            ## Automated Go Version Upgrade
+
+            This PR upgrades Go to the latest stable version across all projects.
+
+            ### Changes
+            - Updated backend/go.mod
+            - Updated all Dockerfiles
+            - Updated docker-compose files
+            - Updated GitHub Actions workflows
+            - Updated tools/worktree-manager
+
+            ### Quality Gates
+            - ✅ Backend build passed
+            - ✅ Backend tests passed
+            - ✅ Tools build passed
+
+            **Review carefully before merging - this affects all Go code.**
+          auto_merge: false
+
+      rollback:
+        enabled: true
+        strategy: "cleanup-worktree"
+
+    notifications:
+      on_success:
+        - type: slack
+          title: "#infrastructure"
+          body: "✅ Go version upgraded across all projects - PR created for review"
+          recipients:
+            - "${SLACK_WEBHOOK_URL}"
+
+      on_failure:
+        - type: slack
+          title: "#alerts"
+          body: "❌ Go version upgrade failed - manual intervention required"
+          recipients:
+            - "${SLACK_WEBHOOK_URL}"
+
+  dead-code-cleanup:
+    name: "Dead Code Cleanup (Backend)"
+    description: "Identify and remove dead code in backend using Claude Code"
+    schedule: "0 14 1 * *"  # First day of month at 2 PM
+
+    context:
+      preset: backend
+      branch: main
+      instance: 94
+      yolo: true
+
+    steps:
+      # Phase 1: Shell-based detection (until skill steps implemented)
+      - name: "Find unused exports"
+        type: shell
+        command: |
+          cd backend
+          echo "=== Unused Exports Analysis ==="
+          # This will be replaced with Claude Code skill in Phase 4
+          # For now, just log a placeholder
+          echo "TODO: Implement with Claude Code /backend skill for dead code analysis"
+        working_dir: "backend"
+
+      # Phase 4: Will be replaced with Claude Code skill
+      # - name: "Analyze and remove dead code"
+      #   type: skill
+      #   skill: "/backend"
+      #   args: "analyze dead code and remove unused exports, functions, and types"
+
+    safety:
+      gates:
+        - name: "Go build"
+          command: "cd backend && go build ./..."
+          required: true
+        - name: "Go vet"
+          command: "cd backend && go vet ./..."
+          required: true
+        - name: "Unit tests"
+          command: "cd backend && make test-unit"
+          required: true
+        - name: "Integration tests"
+          command: "cd backend && make test-integration"
+          required: true
+
+      git:
+        branch: "automated/dead-code-cleanup-{date}"
+        commit_message: |
+          refactor: remove dead code
+
+          Automated dead code cleanup:
+          - Removed unused exports
+          - Removed unused functions
+          - Removed unused types
+
+          Co-Authored-By: Worktree Manager Agent <noreply@skillsetup.com>
+        push:
+          enabled: true
+          create_pr: true
+          pr_title: "Refactor: Dead Code Cleanup ({date})"
+          pr_body: |
+            ## Automated Dead Code Cleanup
+
+            This PR removes dead code identified by automated analysis.
+
+            ### Changes
+            - Removed unused exports
+            - Removed unused functions
+            - Removed unused types
+
+            ### Quality Gates
+            - ✅ Build passed
+            - ✅ Go vet passed
+            - ✅ Unit tests passed
+            - ✅ Integration tests passed
+
+            **Review changes carefully before merging.**
+          auto_merge: false
+
+      rollback:
+        enabled: true
+        strategy: "cleanup-worktree"
+
+    notifications:
+      on_success:
+        - type: slack
+          title: "#engineering"
+          body: "✅ Dead code cleanup completed - PR created for review"
+          recipients:
+            - "${SLACK_WEBHOOK_URL}"
+
+      on_failure:
+        - type: slack
+          title: "#alerts"
+          body: "❌ Dead code cleanup failed - check logs"
+          recipients:
+            - "${SLACK_WEBHOOK_URL}"

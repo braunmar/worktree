@@ -1,3 +1,6 @@
+// Package ui provides colored terminal output utilities for the worktree manager CLI.
+// It includes functions for printing success, error, warning, and informational messages
+// with consistent formatting and emoji indicators.
 package ui
 
 import (

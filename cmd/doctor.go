@@ -2,10 +2,10 @@ package cmd
 
 import (
 	"fmt"
-	"os"
 	"github.com/braunmar/worktree/pkg/config"
 	"github.com/braunmar/worktree/pkg/doctor"
 	"github.com/braunmar/worktree/pkg/registry"
+	"os"
 
 	"github.com/spf13/cobra"
 )

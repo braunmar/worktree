@@ -5,14 +5,14 @@ type ScheduledAgents map[string]*AgentTask
 
 // AgentTask represents a scheduled agent maintenance task
 type AgentTask struct {
-	Name          string         `yaml:"name"`
-	Description   string         `yaml:"description"`
-	Schedule      string         `yaml:"schedule"`
-	Context       AgentContext   `yaml:"context"`
-	Steps         []AgentStep    `yaml:"steps,omitempty"`
-	Safety        SafetyConfig   `yaml:"safety"`
-	Notifications NotifyConfig   `yaml:"notifications"`
-	GSD           *GSDConfig     `yaml:"gsd,omitempty"` // GSD framework integration
+	Name          string       `yaml:"name"`
+	Description   string       `yaml:"description"`
+	Schedule      string       `yaml:"schedule"`
+	Context       AgentContext `yaml:"context"`
+	Steps         []AgentStep  `yaml:"steps,omitempty"`
+	Safety        SafetyConfig `yaml:"safety"`
+	Notifications NotifyConfig `yaml:"notifications"`
+	GSD           *GSDConfig   `yaml:"gsd,omitempty"` // GSD framework integration
 }
 
 // AgentContext defines the execution environment for an agent task
@@ -26,10 +26,10 @@ type AgentContext struct {
 // AgentStep represents a single step in an agent task
 type AgentStep struct {
 	Name       string `yaml:"name"`
-	Type       string `yaml:"type"`                 // "shell" or "skill"
-	Command    string `yaml:"command,omitempty"`    // For shell steps
-	Skill      string `yaml:"skill,omitempty"`      // For skill steps
-	Args       string `yaml:"args,omitempty"`       // Arguments for skill steps
+	Type       string `yaml:"type"`                  // "shell" or "skill"
+	Command    string `yaml:"command,omitempty"`     // For shell steps
+	Skill      string `yaml:"skill,omitempty"`       // For skill steps
+	Args       string `yaml:"args,omitempty"`        // Arguments for skill steps
 	WorkingDir string `yaml:"working_dir,omitempty"` // Working directory for execution
 }
 
@@ -77,7 +77,7 @@ type NotifyConfig struct {
 
 // Notification represents a single notification channel
 type Notification struct {
-	Type       string   `yaml:"type"` // "slack", "email", "gitlab_issue"
+	Type       string   `yaml:"type"`                 // "slack", "email", "gitlab_issue"
 	Project    string   `yaml:"project,omitempty"`    // GitLab project (for gitlab_issue)
 	Title      string   `yaml:"title,omitempty"`      // Slack channel or email subject
 	Body       string   `yaml:"body,omitempty"`       // Message body
@@ -87,8 +87,8 @@ type Notification struct {
 
 // GSDConfig defines GSD framework integration settings
 type GSDConfig struct {
-	Enabled      bool   `yaml:"enabled"`                   // Enable GSD workflow
-	Milestone    string `yaml:"milestone"`                 // GSD milestone name
-	ReadTaskFile bool   `yaml:"read_task_file,omitempty"`  // Read .task.md from worktree
-	AutoExecute  bool   `yaml:"auto_execute,omitempty"`    // Auto-execute after planning
+	Enabled      bool   `yaml:"enabled"`                  // Enable GSD workflow
+	Milestone    string `yaml:"milestone"`                // GSD milestone name
+	ReadTaskFile bool   `yaml:"read_task_file,omitempty"` // Read .task.md from worktree
+	AutoExecute  bool   `yaml:"auto_execute,omitempty"`   // Auto-execute after planning
 }

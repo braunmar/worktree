@@ -3,12 +3,12 @@ package doctor
 import (
 	"bytes"
 	"fmt"
-	"os/exec"
-	"strconv"
-	"strings"
 	"github.com/braunmar/worktree/pkg/config"
 	"github.com/braunmar/worktree/pkg/git"
 	"github.com/braunmar/worktree/pkg/registry"
+	"os/exec"
+	"strconv"
+	"strings"
 )
 
 // CheckGitStatus checks git status for a worktree
