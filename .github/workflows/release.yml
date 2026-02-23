@@ -21,7 +21,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.25.4'
+          go-version: '1.25.7'
 
       - name: Get version from tag
         id: get_version
@@ -29,11 +29,6 @@ jobs:
 
       - name: Run tests
         run: make test-all
-        env:
-          GIT_AUTHOR_NAME: 'Release Bot'
-          GIT_AUTHOR_EMAIL: 'release@example.com'
-          GIT_COMMITTER_NAME: 'Release Bot'
-          GIT_COMMITTER_EMAIL: 'release@example.com'
 
       - name: Build binaries
         run: |
@@ -74,34 +69,6 @@ jobs:
           ## What's Changed
 
           ${COMMITS}
-
-          ## Installation
-
-          ### Quick Install
-          \`\`\`bash
-          # Linux (AMD64)
-          curl -L https://github.com/braunmar/worktree/releases/download/v${{ steps.get_version.outputs.VERSION }}/worktree-linux-amd64 -o worktree
-          chmod +x worktree
-          sudo mv worktree /usr/local/bin/
-
-          # macOS (Apple Silicon)
-          curl -L https://github.com/braunmar/worktree/releases/download/v${{ steps.get_version.outputs.VERSION }}/worktree-darwin-arm64 -o worktree
-          chmod +x worktree
-          sudo mv worktree /usr/local/bin/
-
-          # macOS (Intel)
-          curl -L https://github.com/braunmar/worktree/releases/download/v${{ steps.get_version.outputs.VERSION }}/worktree-darwin-amd64 -o worktree
-          chmod +x worktree
-          sudo mv worktree /usr/local/bin/
-          \`\`\`
-
-          ### Verify Installation
-          \`\`\`bash
-          worktree --version
-          \`\`\`
-
-          ## Checksums
-          See \`checksums.txt\` for SHA256 checksums.
           EOF
 
       - name: Create Release
@@ -110,7 +77,6 @@ jobs:
           body_path: release_notes.md
           files: |
             dist/worktree-*
-            dist/checksums.txt
           draft: false
           prerelease: ${{ contains(github.ref, 'alpha') || contains(github.ref, 'beta') || contains(github.ref, 'rc') }}
         env:
