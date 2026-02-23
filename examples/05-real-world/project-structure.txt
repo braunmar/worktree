@@ -1,0 +1,94 @@
+Project - Real-World Multi-Repo Production Structure
+
+project/                                         # Project root (NOT a git repo)
+├── .claude/                                     # Shared Claude config
+│   ├── skills/                                  # Shared orchestration skills
+│   │   ├── backend-skill.sh                     # /backend orchestration
+│   │   ├── frontend-skill.sh                    # /frontend orchestration
+│   │   ├── fullstack-skill.sh                   # /fullstack orchestration
+│   │   └── fullstack-team-skill.sh              # /fullstack-team with E2E tests
+│   ├── hooks/                                   # Shared Git hooks
+│   │   ├── pre-commit                           # Runs before git commit
+│   │   └── pre-push                             # Runs before git push
+│   └── README.md                                # Documentation for shared config
+├── .worktree.yml                                # Worktree-manager config (652 lines)
+├── CLAUDE.md                                    # Navigation across repos
+├── README.md                                    # Project overview
+├── backend/                                     # Separate Git repo (Go/Fiber API)
+│   ├── .git/                                    # Full git repository
+│   ├── docker-compose.yml                       # Uses ${APP_PORT:-8080}, ${POSTGRES_PORT:-5432}
+│   ├── Dockerfile
+│   ├── Makefile                                 # migrate, seed, test, lint, etc.
+│   ├── go.mod
+│   ├── main.go
+│   ├── cmd/
+│   ├── internal/
+│   └── ...
+├── frontend/                                    # Separate Git repo (React/TypeScript/Chakra UI)
+│   ├── .git/                                    # Full git repository
+│   ├── docker-compose.yml                       # Uses ${FE_PORT:-3000}
+│   ├── Dockerfile
+│   ├── package.json
+│   ├── tsconfig.json
+│   ├── src/
+│   │   ├── components/
+│   │   ├── pages/
+│   │   ├── services/                            # API calls (uses REACT_APP_API_BASE_URL)
+│   │   └── ...
+│   └── e2e/                                     # Playwright E2E tests
+│       └── tests/
+├── web/                                         # Separate Git repo (Marketing website)
+│   ├── .git/
+│   ├── package.json
+│   └── ...
+├── infrastructure/                              # Separate Git repo (Terraform, K8s)
+│   ├── .git/
+│   ├── terraform/
+│   └── kubernetes/
+├── ai-config/                                   # Separate Git repo (Claude/AI config)
+│   ├── .git/
+│   └── ...
+└── worktrees/                                   # Created by worktree-manager
+    ├── .registry.json                           # Port allocation registry
+    └── feature-*/                               # One directory per feature
+        ├── .worktree-instance                   # Marker file (auto-detection)
+        ├── .claude -> ../../.claude             # Symlinked
+        └── <project-dirs>/                      # Git worktrees for selected preset
+            ├── .env.worktree                    # Generated env file
+            └── docker-compose.yml               # Uses ${VAR:-default} ports
+
+Examples of different preset combinations:
+- feature-user-profile/ (fullstack): backend/ + frontend/
+- feature-landing-redesign/ (web): web/ only
+- feature-optimize-api/ (backend): backend/ only
+- release-v2.0/ (all): backend/ + frontend/ + web/ + infrastructure/ + ai-config/
+
+Key Points:
+1. **5 separate Git repositories** - Each project is independent
+2. **Shared .claude/ directory** - Symlinked to all worktrees for shared skills, hooks
+3. **Multiple preset scenarios** - fullstack (2 projects), backend/frontend/web (1 each), all (5 projects)
+4. **Instance isolation** - Each gets unique ports, no conflicts
+5. **Auto-detection** - .worktree-instance marker enables commands without feature name
+6. **Generated files** - .env.worktree, .instance-info created per project
+7. **Docker Compose** - All projects use docker-compose.yml with ${VAR:-default} pattern
+
+Port Allocation Example:
+- Instance 0: APP_PORT=8080, FE_PORT=3000, POSTGRES_PORT=5432, REDIS_PORT=6379
+- Instance 1: APP_PORT=8081, FE_PORT=3001, POSTGRES_PORT=5433, REDIS_PORT=6380
+- Instance 2: WEB_PORT=4000 (web preset - only web project uses ports)
+- Instance 3: APP_PORT=8083, POSTGRES_PORT=5435 (backend preset - only backend ports)
+- Instance 4: APP_PORT=8084, FE_PORT=3004, WEB_PORT=4004, etc. (all preset - all ports)
+
+Scheduled Agents (Run Automatically):
+- npm-audit: Mondays 9 AM - npm audit fix in frontend
+- go-deps-update: Mondays 10 AM - go get -u in backend
+- go-version-upgrade: 1st of month 11 AM - Go version upgrades
+- dead-code-cleanup: 1st of month 2 PM - Remove unused code
+
+This structure supports:
+- ✅ 5+ concurrent feature branches
+- ✅ Different combinations via presets
+- ✅ Automated maintenance via scheduled agents
+- ✅ Shared configuration via symlinks
+- ✅ Clean separation of concerns
+- ✅ No port conflicts ever!

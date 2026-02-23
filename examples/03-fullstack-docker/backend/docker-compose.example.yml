@@ -1,0 +1,88 @@
+# Backend docker-compose.yml Example
+#
+# KEY PATTERN: Use ${ENV_VAR:-default} for ports
+#
+# How it works:
+# - Worktree-manager sets ENV_VAR (e.g., APP_PORT=8081 for instance 1)
+# - Docker Compose reads from environment
+# - Falls back to default if env var not set (for manual 'docker compose up')
+#
+# This lets you run MULTIPLE instances without port conflicts!
+
+version: '3.8'
+
+services:
+  api:
+    build: .
+    ports:
+      # External:Internal mapping
+      # External port is DYNAMIC (from worktree-manager)
+      # Internal port is FIXED (8080 inside container)
+      - "${APP_PORT:-8080}:8080"
+    environment:
+      - PORT=8080                                    # Internal port (always 8080 in container)
+      - DATABASE_URL=postgresql://postgres:postgres@postgres:${POSTGRES_PORT}/app
+      - CORS_ALLOWED_ORIGINS=http://localhost:${FE_PORT}
+    depends_on:
+      - postgres
+    volumes:
+      - ./:/app                                      # Mount code for hot reload
+    command: go run main.go                          # Or: npm run dev, python app.py
+
+  postgres:
+    image: postgres:15-alpine
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    environment:
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=app
+      - POSTGRES_USER=postgres
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  mailpit:
+    image: axllent/mailpit:latest
+    ports:
+      - "${MAILPIT_PORT:-8025}:8025"  # Web UI
+      - "${MAILPIT_SMTP_PORT:-1025}:1025"  # SMTP server
+    environment:
+      - MP_MAX_MESSAGES=500
+      - MP_SMTP_AUTH_ACCEPT_ANY=1
+      - MP_SMTP_AUTH_ALLOW_INSECURE=1
+
+volumes:
+  postgres_data:
+
+# What happens when you run 'worktree new-feature feature/user-auth':
+#
+# 1. Worktree-manager allocates ports:
+#    - APP_PORT=8080
+#    - POSTGRES_PORT=5432
+#    - MAILPIT_PORT=8025
+#
+# 2. Exports env vars before running 'docker compose up -d':
+#    export APP_PORT=8080
+#    export POSTGRES_PORT=5432
+#    export MAILPIT_PORT=8025
+#
+# 3. Docker Compose reads env vars:
+#    "${APP_PORT:-8080}" becomes "8080:8080"
+#    "${POSTGRES_PORT:-5432}" becomes "5432:5432"
+#
+# 4. Services bind to host ports: 8080, 5432, 8025
+#
+# For second feature 'feature/payments':
+#
+# 1. Allocates NEW ports (no conflicts):
+#    - APP_PORT=8081
+#    - POSTGRES_PORT=5433
+#    - MAILPIT_PORT=8026
+#
+# 2. Services bind to host ports: 8081, 5433, 8026
+#
+# 3. Both instances run simultaneously - NO CONFLICTS! 🎉

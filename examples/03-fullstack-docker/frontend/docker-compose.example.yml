@@ -1,0 +1,36 @@
+# Frontend docker-compose.yml Example
+#
+# KEY PATTERN: Use ${FE_PORT:-3000} for dynamic port allocation
+
+version: '3.8'
+
+services:
+  app:
+    build: .
+    ports:
+      - "${FE_PORT:-3000}:3000"
+    environment:
+      # Pass env vars to frontend container
+      - REACT_APP_API_BASE_URL=${REACT_APP_API_BASE_URL}
+      - WDS_SOCKET_PORT=${FE_PORT}  # For hot reload (Webpack Dev Server)
+      - VITE_API_BASE_URL=${REACT_APP_API_BASE_URL}  # For Vite projects
+    volumes:
+      - ./src:/app/src                                 # Hot reload for development
+      - /app/node_modules                              # Don't overwrite container node_modules
+    command: npm start  # Or: npm run dev (for Vite)
+
+# What happens:
+#
+# Instance 0:
+# - FE_PORT=3000
+# - REACT_APP_API_BASE_URL=http://localhost:8080
+# - Frontend runs on http://localhost:3000
+# - Frontend calls API at http://localhost:8080
+#
+# Instance 1:
+# - FE_PORT=3001
+# - REACT_APP_API_BASE_URL=http://localhost:8081
+# - Frontend runs on http://localhost:3001
+# - Frontend calls API at http://localhost:8081
+#
+# Both frontends work independently with their own backend!

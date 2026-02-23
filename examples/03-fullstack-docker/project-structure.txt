@@ -1,0 +1,62 @@
+Project - Multi-Repo Project Structure with Docker
+
+project/                                         # Project root (NOT a git repo)
+├── .claude/                                     # Shared Claude config
+│   ├── skills/                                  # Shared orchestration skills
+│   │   ├── backend-skill.sh
+│   │   ├── frontend-skill.sh
+│   │   └── fullstack-skill.sh
+│   └── hooks/                                   # Shared hooks
+│       └── pre-commit
+├── .worktree.yml                                # Worktree-manager config
+├── CLAUDE.md                                    # Navigation across repos
+├── backend/                                     # Separate Git repo
+│   ├── .git/                                    # Full git repository
+│   ├── docker-compose.yml                       # Uses ${APP_PORT:-8080}
+│   ├── Dockerfile
+│   ├── main.go
+│   └── ...
+├── frontend/                                    # Separate Git repo
+│   ├── .git/                                    # Full git repository
+│   ├── docker-compose.yml                       # Uses ${FE_PORT:-3000}
+│   ├── Dockerfile
+│   ├── package.json
+│   └── src/
+│       └── ...
+└── worktrees/                                   # Created by worktree-manager
+    ├── .registry.json                           # Port allocation registry
+    ├── feature-user-auth/                       # Instance 0
+    │   ├── .worktree-instance                   # Marker file (auto-detection)
+    │   ├── .claude -> ../../.claude             # Symlinked (shared config)
+    │   ├── backend/                             # Git worktree (branch: feature/user-auth)
+    │   │   ├── .env.worktree                    # Generated env file
+    │   │   ├── docker-compose.yml               # Uses ports: APP_PORT=8080, POSTGRES_PORT=5432
+    │   │   └── ...
+    │   └── frontend/                            # Git worktree (branch: feature/user-auth)
+    │       ├── .env.worktree                    # Generated env file
+    │       ├── docker-compose.yml               # Uses ports: FE_PORT=3000
+    │       └── ...
+    └── feature-payments/                        # Instance 1
+        ├── .worktree-instance
+        ├── .claude -> ../../.claude
+        ├── backend/                             # Git worktree (branch: feature/payments)
+        │   ├── .env.worktree
+        │   └── docker-compose.yml               # Uses ports: APP_PORT=8081, POSTGRES_PORT=5433
+        └── frontend/                            # Git worktree (branch: feature/payments)
+            ├── .env.worktree
+            └── docker-compose.yml               # Uses ports: FE_PORT=3001
+
+Key Points:
+1. Root directory contains MULTIPLE git repositories (backend/, frontend/, etc.)
+2. Each repository has its own .git directory
+3. .claude/ is shared across all worktrees via symlinks
+4. worktrees/ directory contains git worktrees with separate branches
+5. Each worktree instance gets UNIQUE ports (no conflicts!)
+6. docker-compose.yml uses ${VAR:-default} pattern for dynamic ports
+7. Generated .env.worktree files contain all env vars for each instance
+
+How Docker Compose Uses Ports:
+- Instance 0: Backend containers bind to 8080, 5432, 8025 on host
+- Instance 1: Backend containers bind to 8081, 5433, 8026 on host
+- Inside containers: Always use fixed ports (8080, 5432, etc.)
+- Port mapping: HOST:CONTAINER (e.g., "8081:8080" means host port 8081 → container port 8080)

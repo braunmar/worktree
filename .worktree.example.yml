@@ -12,6 +12,23 @@ project_name: "myproject"
 # Examples: "localhost", "dev.mycompany.com", "192.168.1.100"
 hostname: localhost
 
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# EXECUTOR DECISION TREE
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# DECISION: What executor should I use for this project?
+#
+# IF service uses docker-compose → executor: docker
+#    Example: Backend with docker-compose up -d
+#
+# IF service is long-running process → executor: process
+#    Examples: npm start, go run main.go, python app.py
+#
+# IF service is one-shot command → no executor needed
+#    Examples: make build, npm install
+#
+# See SKILL.md Section 3.2 for detailed decision tree and examples.
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
 # Project definitions
 #
 # EXECUTOR TYPES:
@@ -134,6 +151,36 @@ generated_files:
         # This file will be regenerated when the worktree is started
         REACT_APP_API_BASE_URL=http://localhost:{BE_PORT}
         WDS_SOCKET_PORT={FE_PORT}
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# PORT CONFIGURATION DECISION TREE
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# There are 4 types of port entries:
+#
+# Type 1: ALLOCATED PORTS (most common)
+#   - Service binds to a network port
+#   - Need unique port per instance
+#   - Required fields: name, url, port, env, range (CRITICAL!)
+#   - Examples: Web servers, databases, message queues
+#
+# Type 2: CALCULATED PORTS (rare)
+#   - Service needs a BLOCK of contiguous ports
+#   - Required fields: port (with {instance}), env
+#   - NO range field
+#   - Examples: LocalStack (50 ports per instance)
+#
+# Type 3: STRING TEMPLATES
+#   - Env var references another port
+#   - Required fields: value (with {PLACEHOLDER}), env
+#   - Examples: DATABASE_URL="postgresql://localhost:{PG_PORT}/db"
+#
+# Type 4: DISPLAY-ONLY
+#   - Show in UI but don't export
+#   - Required fields: name, url, port, env: null
+#   - Examples: Swagger UI (uses backend port)
+#
+# See SKILL.md Section 3.4 for detailed decision tree and examples.
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 # Environment variable configuration (single source of truth)
 # Defines all environment variables exported to start_command and post_command.

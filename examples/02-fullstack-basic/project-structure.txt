@@ -1,0 +1,28 @@
+Fullstack Basic - Project Structure
+
+myapp/                                   # Project root
+├── .worktree.yml                        # Worktree-manager config
+├── backend/                             # Separate Git repo
+│   ├── .git/                            # Full git repository
+│   └── main.go                          # Or index.js, app.py, etc.
+├── frontend/                            # Separate Git repo
+│   ├── .git/                            # Full git repository
+│   ├── package.json
+│   └── src/
+│       └── App.jsx
+└── worktrees/                           # Created by worktree-manager
+    ├── .registry.json                   # Port allocation registry
+    └── feature-user-profile/            # Instance 0
+        ├── .worktree-instance           # Marker file (auto-detection)
+        ├── backend/                     # Git worktree (branch: feature/user-profile)
+        │   └── main.go
+        └── frontend/                    # Git worktree (branch: feature/user-profile)
+            └── src/
+                └── App.jsx
+
+Key Points:
+1. Root directory contains TWO separate git repositories
+2. Each has its own .git directory
+3. Worktrees are created in worktrees/ directory
+4. Both projects run as background processes (no Docker)
+5. Frontend knows backend URL via REACT_APP_API_BASE_URL env var

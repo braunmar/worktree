@@ -1,0 +1,43 @@
+# Frontend - docker-compose.yml Example
+
+version: '3.8'
+
+services:
+  app:
+    build: .
+    ports:
+      - "${FE_PORT:-3000}:3000"
+    environment:
+      - REACT_APP_API_BASE_URL=${REACT_APP_API_BASE_URL}
+      - WDS_SOCKET_PORT=${FE_PORT}  # For Webpack hot reload
+      - VITE_API_BASE_URL=${REACT_APP_API_BASE_URL}  # For Vite
+    volumes:
+      - ./src:/app/src  # Hot reload
+      - /app/node_modules
+    command: npm start
+
+# Example frontend code (React):
+#
+# const API_BASE_URL = process.env.REACT_APP_API_BASE_URL || 'http://localhost:8080';
+#
+# function ReportGenerator() {
+#   const [status, setStatus] = useState('');
+#
+#   const generateReport = async () => {
+#     setStatus('Queuing...');
+#     const res = await fetch(`${API_BASE_URL}/api/process-report`, {
+#       method: 'POST',
+#       headers: { 'Content-Type': 'application/json' },
+#       body: JSON.stringify({ type: 'monthly', month: '2024-01' })
+#     });
+#     const data = await res.json();
+#     setStatus(`Job queued! Worker will process it.`);
+#   };
+#
+#   return (
+#     <div>
+#       <button onClick={generateReport}>Generate Report</button>
+#       <p>{status}</p>
+#     </div>
+#   );
+# }

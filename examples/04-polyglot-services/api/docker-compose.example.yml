@@ -1,0 +1,70 @@
+# Node.js API - docker-compose.yml Example
+#
+# This service handles HTTP API requests and enqueues background jobs to Redis
+
+version: '3.8'
+
+services:
+  api:
+    build: .
+    ports:
+      - "${API_PORT:-8080}:8080"
+    environment:
+      - PORT=8080  # Internal port
+      - NODE_ENV=development
+      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/app
+      - REDIS_URL=redis://redis:6379
+      - CORS_ALLOWED_ORIGINS=http://localhost:${FE_PORT}
+    depends_on:
+      - postgres
+      - redis
+    volumes:
+      - ./src:/app/src  # Hot reload
+      - /app/node_modules
+    command: npm run dev
+
+  postgres:
+    image: postgres:15-alpine
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    environment:
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=app
+      - POSTGRES_USER=postgres
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
+
+volumes:
+  postgres_data:
+  redis_data:
+
+# Example API code (Node.js/Express):
+#
+# const express = require('express');
+# const Redis = require('ioredis');
+#
+# const app = express();
+# const redis = new Redis(process.env.REDIS_URL);
+#
+# app.post('/api/process-report', async (req, res) => {
+#   // Enqueue job for worker
+#   await redis.lpush('jobs', JSON.stringify({
+#     type: 'generate_report',
+#     data: req.body
+#   }));
+#   res.json({ status: 'queued' });
+# });
+#
+# app.listen(8080);

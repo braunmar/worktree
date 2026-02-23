@@ -1,0 +1,69 @@
+# Fullstack Basic Example - No Docker Required
+#
+# Perfect for: npm start, go run, python workflows
+#
+# This example shows:
+# - Multiple projects (frontend + backend)
+# - Process executors (no Docker)
+# - How presets group projects
+# - How env vars reference each other
+
+project_name: "myapp"
+hostname: localhost
+
+projects:
+  backend:
+    executor: process
+    dir: backend
+    main_branch: main
+    start_command: "go run main.go"  # Or: npm start, python app.py
+    claude_working_dir: true  # Claude navigates here after worktree creation
+
+  frontend:
+    executor: process
+    dir: frontend
+    main_branch: main
+    start_command: "npm start"  # Or: npm run dev, yarn dev
+
+presets:
+  # Run everything
+  fullstack:
+    projects: [backend, frontend]
+    description: "Full stack (backend + frontend)"
+
+  # Backend only
+  backend:
+    projects: [backend]
+    description: "Backend API only"
+
+  # Frontend only
+  frontend:
+    projects: [frontend]
+    description: "Frontend only"
+
+default_preset: fullstack
+
+env_variables:
+  # Backend API port
+  APP_PORT:
+    name: "Backend API"
+    url: "http://{host}:{port}"
+    port: "8080"
+    env: "APP_PORT"
+    range: [8080, 8180]
+
+  # Frontend port
+  FE_PORT:
+    name: "Frontend"
+    url: "http://{host}:{port}"
+    port: "3000"
+    env: "FE_PORT"
+    range: [3000, 3100]
+
+  # String template that references APP_PORT
+  # This is HOW the frontend knows where the backend is!
+  REACT_APP_API_BASE_URL:
+    name: "API Base URL (for frontend)"
+    url: "{value}"
+    value: "http://{host}:{APP_PORT}"
+    env: "REACT_APP_API_BASE_URL"

@@ -1,0 +1,50 @@
+Polyglot Services - Project Structure (Node API + Python Worker + React Frontend)
+
+polyglot-app/                                    # Project root
+├── .worktree.yml                                # Worktree-manager config
+├── api/                                         # Separate Git repo (Node.js)
+│   ├── .git/
+│   ├── docker-compose.yml                       # Uses ${API_PORT:-8080}
+│   ├── package.json
+│   ├── src/
+│   │   └── server.js                            # Express/Fastify API
+│   └── ...
+├── worker/                                      # Separate Git repo (Python)
+│   ├── .git/
+│   ├── docker-compose.yml                       # Uses ${WORKER_PORT:-8081}
+│   ├── requirements.txt
+│   ├── worker.py                                # Celery/RQ/custom worker
+│   └── ...
+└── frontend/                                    # Separate Git repo (React)
+    ├── .git/
+    ├── docker-compose.yml                       # Uses ${FE_PORT:-3000}
+    ├── package.json
+    ├── src/
+    │   └── App.jsx
+    └── ...
+
+Worktrees (created by worktree-manager):
+
+worktrees/
+├── .registry.json
+├── feature-user-profile/                        # fullstack preset (API + Frontend)
+│   ├── .worktree-instance
+│   ├── api/                                     # Ports: API_PORT=8080, POSTGRES_PORT=5432
+│   └── frontend/                                # Ports: FE_PORT=3000
+├── feature-monthly-reports/                     # frontend-all preset (all services)
+│   ├── .worktree-instance
+│   ├── api/                                     # Ports: API_PORT=8081, POSTGRES_PORT=5433
+│   ├── worker/                                  # Ports: WORKER_PORT=8082
+│   └── frontend/                                # Ports: FE_PORT=3001
+└── feature-optimize-worker/                     # api-worker preset (API + Worker)
+    ├── .worktree-instance
+    ├── api/                                     # Ports: API_PORT=8083, POSTGRES_PORT=5435
+    └── worker/                                  # Ports: WORKER_PORT=8084
+
+Key Points:
+1. Three separate git repositories (api, worker, frontend)
+2. Each service can be in a different language
+3. Presets determine which services run for each feature
+4. Port allocation is independent of preset choice
+5. Services communicate via Docker network (internal ports)
+6. Frontend calls API using external port (REACT_APP_API_BASE_URL)

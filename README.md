@@ -7,6 +7,8 @@
 
 > **Disclaimer:** This software is provided "as is", without warranty of any kind. See [LICENSE](LICENSE) for full terms.
 
+> **For AI Agents:** Setting up worktree-manager for a new project? See [SKILL.md](SKILL.md) for comprehensive AI-friendly setup guidance with configuration wizards and decision trees.
+
 ## Motivation
 
 A CLI tool for managing multiple git worktrees with coordinated Docker environments and dynamic port allocation.
@@ -20,6 +22,10 @@ Keep your main .git repo for hotfixes and code reviews. Configure, run and devel
 Simply configure your needs, wrapping git worktrees, allocating ports, setting correct ENVironment and executing pre-command, command, post-command to manage multiple git worktrees environments.
 
 ## Quick Start
+
+**For AI Agents:** See [SKILL.md](SKILL.md) for step-by-step configuration wizard and decision trees.
+
+**For Humans:**
 
 ### 1. Install
 
@@ -62,8 +68,30 @@ worktree doctor                  # Check health
 
 ## Documentation
 
-- **Configuration**: See [.worktree.example.yml](.worktree.example.yml) or real project configuration [.worktree.example-real.yml](.worktree.example-real.yml) for all options
-- **Development**: See [CLAUDE.md](CLAUDE.md) for architecture and patterns
+### Getting Started
+
+New to worktree-manager? Start with a hands-on example:
+
+- **[Fullstack Docker Guide](examples/03-fullstack-docker/)** - Frontend + Backend with Docker Compose ⭐ Most Common
+  - Learn the `${APP_PORT:-8080}` pattern
+  - Set up multi-repo structure
+  - Run multiple instances without port conflicts
+- **[All Examples](examples/)** - Browse all examples (minimal → production)
+
+### Configuration Reference
+
+- **[Docker Port Patterns](docs/PORT-PATTERNS.md)** - How to integrate with Docker Compose ⭐
+- **[Complete Config](.worktree.example.yml)** - All options documented (492 lines)
+- **[Real Project Config](.worktree.example-real.yml)** - Production setup (652 lines)
+
+### Guides
+
+- **[Migration Guide](examples/MIGRATION-GUIDE.md)** - From hardcoded ports to dynamic allocation
+
+### Developer Reference
+
+- **[Architecture](CLAUDE.md)** - For contributors and AI agents
+- **[AI Agent Setup](SKILL.md)** - Configuration wizard for AI agents
 
 ## TODO
 

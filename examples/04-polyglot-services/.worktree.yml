@@ -1,0 +1,110 @@
+# Polyglot Services Example - Node API + Python Worker + Frontend
+#
+# This example demonstrates:
+# - Multiple services with different languages/stacks
+# - Preset combinations for different workflows
+# - How to run exactly what you need (not everything all the time)
+#
+# Services:
+# - api: Node.js REST API (Express/Fastify)
+# - worker: Python background worker (Celery/RQ/custom)
+# - frontend: React/Vue frontend
+#
+# Presets let you run:
+# - Frontend + API only (no worker) - for UI development
+# - API + Worker only (no frontend) - for backend development
+# - Everything together - for full-stack features
+
+project_name: "polyglot-app"
+hostname: localhost
+
+projects:
+  api:
+    executor: docker
+    dir: api
+    main_branch: main
+    start_command: "docker compose up -d"
+    claude_working_dir: true
+
+  worker:
+    executor: docker
+    dir: worker
+    main_branch: main
+    start_command: "docker compose up -d"
+
+  frontend:
+    executor: docker
+    dir: frontend
+    main_branch: main
+    start_command: "docker compose up -d"
+
+presets:
+  # Just the API + Frontend (most common)
+  fullstack:
+    projects: [api, frontend]
+    description: "Frontend + API only (no worker)"
+
+  # API with background jobs
+  api-worker:
+    projects: [api, worker]
+    description: "API + Worker (no UI)"
+
+  # Frontend with both services
+  frontend-all:
+    projects: [frontend, api, worker]
+    description: "Full stack with worker"
+
+  # Just the API (for testing endpoints)
+  api:
+    projects: [api]
+    description: "API only"
+
+  # Everything
+  all:
+    projects: [api, worker, frontend]
+    description: "All services"
+
+default_preset: fullstack
+
+env_variables:
+  API_PORT:
+    name: "Node.js API"
+    url: "http://{host}:{port}"
+    port: "8080"
+    env: "API_PORT"
+    range: [8080, 8180]
+
+  FE_PORT:
+    name: "Frontend"
+    url: "http://{host}:{port}"
+    port: "3000"
+    env: "FE_PORT"
+    range: [3000, 3100]
+
+  WORKER_PORT:
+    name: "Python Worker (Health Check)"
+    url: "http://{host}:{port}/health"
+    port: "8081"
+    env: "WORKER_PORT"
+    range: [8081, 8181]
+
+  REDIS_PORT:
+    name: "Redis (Job Queue)"
+    url: "{host}:{port}"
+    port: "6379"
+    env: "REDIS_PORT"
+    range: [6379, 6479]
+
+  POSTGRES_PORT:
+    name: "PostgreSQL"
+    url: "{host}:{port}"
+    port: "5432"
+    env: "POSTGRES_PORT"
+    range: [5432, 5532]
+
+  # String templates
+  REACT_APP_API_BASE_URL:
+    name: "API Base URL (for frontend)"
+    url: "{value}"
+    value: "http://{host}:{API_PORT}"
+    env: "REACT_APP_API_BASE_URL"

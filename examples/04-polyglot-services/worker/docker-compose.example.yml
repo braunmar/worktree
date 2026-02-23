@@ -1,0 +1,62 @@
+# Python Worker - docker-compose.yml Example
+#
+# This service processes background jobs from Redis queue
+
+version: '3.8'
+
+services:
+  worker:
+    build: .
+    ports:
+      - "${WORKER_PORT:-8081}:8081"  # Health check endpoint (optional)
+    environment:
+      - WORKER_PORT=8081
+      - PYTHON_ENV=development
+      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/app
+      - REDIS_URL=redis://redis:6379
+    depends_on:
+      - redis
+      - postgres
+    volumes:
+      - ./src:/app/src  # Hot reload
+    command: python worker.py
+
+  # Note: postgres and redis are shared with API service
+  # They connect to the same containers via Docker network
+  #
+  # When you run the api-worker preset:
+  # - API service starts postgres and redis
+  # - Worker service connects to those same containers
+  #
+  # Docker Compose automatically handles this when services
+  # are on the same network (default behavior)
+
+# Example worker code (Python):
+#
+# import redis
+# import psycopg2
+# import json
+# from http.server import HTTPServer, BaseHTTPRequestHandler
+#
+# r = redis.Redis.from_url(os.getenv('REDIS_URL'))
+# conn = psycopg2.connect(os.getenv('DATABASE_URL'))
+#
+# # Health check endpoint
+# class HealthHandler(BaseHTTPRequestHandler):
+#     def do_GET(self):
+#         if self.path == '/health':
+#             self.send_response(200)
+#             self.end_headers()
+#             self.wfile.write(b'OK')
+#
+# # Start health server in background thread
+# server = HTTPServer(('0.0.0.0', 8081), HealthHandler)
+#
+# # Process jobs from Redis
+# while True:
+#     _, job_data = r.brpop('jobs')
+#     job = json.loads(job_data)
+#
+#     if job['type'] == 'generate_report':
+#         # Process report...
+#         print(f"Processing report: {job['data']}")
