@@ -15,13 +15,15 @@ import (
 )
 
 // buildStopEnvList builds the environment variable list needed for stop hooks.
-// Falls back to instance=0 if APP_PORT is not configured.
+// Falls back to instance=0 if no ranged port is configured.
 func buildStopEnvList(workCfg *config.WorktreeConfig, wt *registry.Worktree, featureName string) []string {
 	instance := 0
-	if appPortCfg, ok := workCfg.EnvVariables["APP_PORT"]; ok && appPortCfg.Port != "" {
-		if basePort, err := config.ExtractBasePort(appPortCfg.Port); err == nil {
-			if appPort, ok := wt.Ports["APP_PORT"]; ok {
-				instance = appPort - basePort
+	if instancePortName, err := workCfg.GetInstancePortName(); err == nil {
+		if instancePortCfg, ok := workCfg.EnvVariables[instancePortName]; ok && instancePortCfg.Port != "" {
+			if basePort, err := config.ExtractBasePort(instancePortCfg.Port); err == nil {
+				if allocatedPort, ok := wt.Ports[instancePortName]; ok {
+					instance = allocatedPort - basePort
+				}
 			}
 		}
 	}

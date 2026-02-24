@@ -147,11 +147,13 @@ func runStart(cmd *cobra.Command, args []string) {
 	}
 	ui.NewLine()
 
-	// Calculate instance from allocated APP_PORT in registry
-	appPortCfg := workCfg.EnvVariables["APP_PORT"]
-	basePort, err := config.ExtractBasePort(appPortCfg.Port)
+	// Calculate instance from the first allocated ranged port in registry
+	instancePortName, err := workCfg.GetInstancePortName()
 	checkError(err)
-	instance := wt.Ports["APP_PORT"] - basePort
+	instancePortCfg := workCfg.EnvVariables[instancePortName]
+	basePort, err := config.ExtractBasePort(instancePortCfg.Port)
+	checkError(err)
+	instance := wt.Ports[instancePortName] - basePort
 
 	// Export all environment variables (includes allocated ports + calculated values like INSTANCE, LOCALSTACK_EXT_*)
 	baseEnvVars := workCfg.ExportEnvVars(instance)

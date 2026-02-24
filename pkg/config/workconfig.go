@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -633,4 +634,35 @@ func (c *WorktreeConfig) ReplaceComposeProjectPlaceholders(template, featureName
 	result = strings.ReplaceAll(result, "{feature}", featureName)
 	result = strings.ReplaceAll(result, "{service}", serviceName)
 	return result
+}
+
+// GetInstancePortName returns the name of the env variable used for instance number calculation.
+// It finds the first env variable (alphabetically) that has both a range and a port expression.
+// All ranged ports with base+{instance} expressions yield the same instance number, so any one works.
+func (c *WorktreeConfig) GetInstancePortName() (string, error) {
+	var names []string
+	for name, cfg := range c.EnvVariables {
+		if cfg.Range != nil && cfg.Port != "" {
+			names = append(names, name)
+		}
+	}
+	if len(names) == 0 {
+		return "", fmt.Errorf("no port variable with a range found in env_variables; at least one port must have a range for instance calculation")
+	}
+	sort.Strings(names)
+	return names[0], nil
+}
+
+// GetFirstProjectDir returns the Dir field of the first configured project (alphabetically).
+// Used as a representative git directory for health checks.
+func (c *WorktreeConfig) GetFirstProjectDir() string {
+	var names []string
+	for name := range c.Projects {
+		names = append(names, name)
+	}
+	if len(names) == 0 {
+		return ""
+	}
+	sort.Strings(names)
+	return c.Projects[names[0]].Dir
 }

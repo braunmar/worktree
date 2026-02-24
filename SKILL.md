@@ -211,6 +211,8 @@ $ worktree ports feature-a  # See port allocations
 3. ✅ Ask user: "Do you currently have port conflicts?"
 4. ✅ Explain benefits clearly
 5. ✅ Set expectations (dev-only, requires git worktrees)
+6. ✅ Use the user's **existing** variable names — there are no required names; use whatever the project already calls its ports
+7. ✅ Only suggest changes to existing files when **strictly necessary** for multi-instance isolation — always explain *why* before suggesting any change to the user's files
 
 **Example dialogue:**
 ```
@@ -339,9 +341,9 @@ Expected:
   ├── worker/      (git repo, optional)
   └── .worktree.yml (will be created)
 
-IMPORTANT: Worktree-manager expects backend/ and frontend/ directories
-for project root detection. If these don't exist, it may fail to find
-the correct project root.
+IMPORTANT: Worktree-manager finds the project root by walking up from the
+current directory until it finds a .worktree.yml file. Project directories
+can have any names — backend/, frontend/, api/, worker/, or anything else.
 
 STEP 3: If structure is wrong
 ASK USER:
@@ -854,6 +856,14 @@ default_preset: fullstack
 
 This is the **most complex** part of configuration. AI must understand **4 port types** and correctly classify each service port.
 
+> **ℹ️ Variable names are completely flexible**
+>
+> There are no required variable names. The tool automatically picks the first port with a `range` (alphabetically) to calculate instance numbers. Name your ports whatever your project already uses — `BE_PORT`, `APP_PORT`, `API_PORT`, `BACKEND_PORT` — they all work equally.
+
+> **⚠️ NON-INVASIVE SETUP PRINCIPLE**
+>
+> Do NOT rename the user's existing environment variables. Do NOT restructure their docker-compose files unless strictly required for multi-instance isolation (and always explain why). Scan existing configs first to discover names already in use.
+
 #### Overview: 4 Port Types
 
 | Type | When to Use | Required Fields | Key Characteristic |
@@ -942,15 +952,14 @@ CHECK: Ranges have sufficient size (≥20 ports recommended)
 
 ```yaml
 env_variables:
-  # Backend API
+  # All names below are examples — use whatever your project already calls these ports
   BE_PORT:
     name: "Backend API"
     url: "http://{host}:{port}"
     port: "8080"                    # Base port hint
-    env: "BE_PORT"                  # Exported as $BE_PORT
+    env: "BE_PORT"                  # Could be APP_PORT, API_PORT, BACKEND_PORT — your choice
     range: [8080, 8180]             # 100 ports → supports 10 instances
 
-  # Frontend Dev Server
   FE_PORT:
     name: "Frontend"
     url: "http://{host}:{port}"
@@ -958,7 +967,6 @@ env_variables:
     env: "FE_PORT"
     range: [3000, 3100]             # 100 ports
 
-  # PostgreSQL Database
   POSTGRES_PORT:
     name: "PostgreSQL"
     url: "postgresql://{host}:{port}/dbname"
@@ -966,7 +974,6 @@ env_variables:
     env: "POSTGRES_PORT"
     range: [5432, 5532]             # 100 ports
 
-  # Redis Cache
   REDIS_PORT:
     name: "Redis"
     url: "redis://{host}:{port}"
@@ -1310,6 +1317,19 @@ FOR EACH SERVICE PORT:
 #### AI Workflow: Complete Port Configuration
 
 ```
+STEP 0: DISCOVER EXISTING VARIABLE NAMES (do this FIRST)
+
+Before defining any port variables, scan the user's existing configs:
+1. Read docker-compose.yml — what variable names are already used in ports: sections?
+   e.g., "${APP_PORT}:8080" → use APP_PORT (keep their existing name)
+   e.g., "${DATABASE_PORT}:5432" → use DATABASE_PORT, NOT POSTGRES_PORT
+   e.g., "${REDIS_PORT}:6379" → use REDIS_PORT
+2. Read .env and .env.example files — what PORT variables already exist?
+3. Check package.json scripts for --port flags with variable names
+
+RULE: Use names from the user's existing configs. Do NOT rename variables
+      that already work. There are no required variable names.
+
 STEP 1: AUTO-DETECT ports
 
 Scan files:
@@ -1322,6 +1342,7 @@ Extract:
 - Service names (backend, frontend, postgres, redis)
 - Port numbers (8080, 3000, 5432, 6379)
 - URL patterns (DATABASE_URL, REACT_APP_API_BASE_URL)
+- IMPORTANT: Also extract the existing variable names used for each port
 
 STEP 2: CLASSIFY each port using decision tree
 
@@ -1363,7 +1384,7 @@ CHECK:
 
 ```yaml
 env_variables:
-  # Type 1: Allocated Ports
+  # Type 1: Allocated Ports — all names are examples, use your project's existing names
   BE_PORT:
     name: "Backend API"
     url: "http://{host}:{port}"
@@ -1392,7 +1413,7 @@ env_variables:
     env: "REDIS_PORT"
     range: [6379, 6479]
 
-  # Type 3: String Templates
+  # Type 3: String Templates — placeholder names must match your env_variables keys above
   REACT_APP_API_BASE_URL:
     value: "http://localhost:{BE_PORT}"
     env: "REACT_APP_API_BASE_URL"
@@ -1870,6 +1891,7 @@ presets:
     description: "Frontend only"
 
 env_variables:
+  # All names are examples — use whatever your project already calls these ports
   BE_PORT:
     name: "Backend API"
     url: "http://{host}:{port}"
@@ -1945,6 +1967,7 @@ presets:
     description: "API service only"
 
 env_variables:
+  # All names are examples — use whatever your project already calls these ports
   API_PORT:
     name: "API Service"
     url: "http://{host}:{port}"
@@ -2020,6 +2043,7 @@ presets:
     description: "Backend + Frontend"
 
 env_variables:
+  # All names are examples — use whatever your project already calls these ports
   BE_PORT:
     name: "Django Backend"
     url: "http://{host}:{port}"
@@ -2089,6 +2113,7 @@ presets:
     description: "All services"
 
 env_variables:
+  # All names are examples — use whatever your project already calls these ports
   BE_PORT:
     name: "Backend API"
     url: "http://{host}:{port}"

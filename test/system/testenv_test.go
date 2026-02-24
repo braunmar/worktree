@@ -43,8 +43,9 @@ func TestMain(m *testing.M) {
 }
 
 // TestEnv holds the state for a single system test.
-// Each test gets an isolated temporary project root with backend/ and frontend/
-// directories (required by config.New() for project-root discovery).
+// Each test gets an isolated temporary project root. config.New() locates the
+// project root by walking up from CWD until it finds a .worktree.yml file,
+// which each test writes via writeConfig() before invoking the binary.
 type TestEnv struct {
 	t      *testing.T
 	root   string // temp dir used as the project root
@@ -52,8 +53,6 @@ type TestEnv struct {
 }
 
 // newTestEnv creates a fresh, isolated test environment.
-// It creates the required backend/ and frontend/ directories so that
-// config.New() can locate the project root when the binary is invoked.
 func newTestEnv(t *testing.T) *TestEnv {
 	t.Helper()
 
@@ -73,11 +72,6 @@ func newTestEnv(t *testing.T) *TestEnv {
 	})
 
 	e := &TestEnv{t: t, root: root, binDir: binDir}
-
-	// config.New() walks up from CWD until it finds a dir containing both
-	// backend/ and frontend/. Create them unconditionally.
-	e.mkdir("backend")
-	e.mkdir("frontend")
 	e.mkdir("worktrees")
 
 	return e
@@ -237,7 +231,8 @@ scheduled_agents:
 }
 
 // worktreeConfig returns a .worktree.yml suitable for new-feature tests.
-// It includes env_variables with APP_PORT so that instance calculation works.
+// GetInstancePortName() picks the first alphabetical ranged port (APP_PORT < FE_PORT)
+// for instance calculation.
 func worktreeConfig() string {
 	return `project_name: "testproject"
 hostname: localhost

@@ -52,7 +52,7 @@ Port values support dynamic calculation using `{instance}` placeholder:
 4. Validate result is in range 1-65535
 
 **Instance Calculation**:
-Instance number is derived from allocated APP_PORT: `instance = APP_PORT - basePort`
+Instance number is derived from the first alphabetically-sorted `env_variables` entry that has both a `range` and a `port` expression: `instance = allocatedPort - basePort`. Port variable names are user-defined — no magic names required.
 
 ### Instance Detection System
 
@@ -499,7 +499,7 @@ One project in the preset can be marked as `claude_working_dir: true`. This is w
 
 - **Port allocation is atomic**: Uses registry mutex + file locking
 - **Branch names are normalized**: Always use `registry.NormalizeBranchName()`
-- **Instance number**: Derived from APP_PORT allocation, not user-specified
+- **Instance number**: Derived from the first alphabetical ranged port variable (`GetInstancePortName()`), not user-specified and not tied to any magic name
 - **Port expressions are validated**: At config load time, not runtime
 - **Registry is source of truth**: Not Docker, not Git worktree list
 - **Compose project names**: Per-service to avoid conflicts
