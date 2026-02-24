@@ -81,8 +81,8 @@ New to worktree-manager? Start with a hands-on example:
 ### Configuration Reference
 
 - **[Docker Port Patterns](docs/PORT-PATTERNS.md)** - How to integrate with Docker Compose ⭐
-- **[Complete Config](.worktree.example.yml)** - All options documented (492 lines)
-- **[Real Project Config](.worktree.example-real.yml)** - Production setup (652 lines)
+- **[Complete Config](.worktree.example.yml)** - All options documented
+- **[Real Project Config](.worktree.example-real.yml)** - Production setup
 
 ### Guides
 
@@ -90,7 +90,7 @@ New to worktree-manager? Start with a hands-on example:
 
 ### Developer Reference
 
-- **[Architecture](CLAUDE.md)** - For contributors and AI agents
+- **[Architecture](AGENTS.md)** - For contributors and AI agents
 - **[AI Agent Setup](SKILL.md)** - Configuration wizard for AI agents
 
 ## TODO

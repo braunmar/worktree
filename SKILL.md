@@ -2900,9 +2900,9 @@ You can now create real feature worktrees:
 - **[README.md](README.md)** - Quick start, installation, overview
 - **[.worktree.example.yml](.worktree.example.yml)** - Complete example configuration with 493 lines of comments
 - **[.worktree.example-real.yml](.worktree.example-real.yml)** - Real-world configuration from project
-- **[CLAUDE.md](CLAUDE.md)** - Architecture, development patterns, package organization (for developers)
+- **[AGENTS.md](AGENTS.md)** - Architecture, development patterns, package organization (for developers)
 - **[CONTRIBUTING.md](CONTRIBUTING.md)** - Contribution guidelines, code style, architecture
-- **[docs/AGENTS-EXAMPLES.md](docs/AGENTS-EXAMPLES.md)** - Scheduled agents guide with production examples
+- **[examples/](examples/)** - Practical examples and tutorials
 
 ### 10.2 When to Reference Other Docs
 
@@ -2918,7 +2918,7 @@ You can now create real feature worktrees:
 - ✅ All configuration options with inline comments
 - ✅ Complex examples (scheduled agents, generated files)
 
-**Use CLAUDE.md for:**
+**Use AGENTS.md for:**
 - ✅ Developing worktree-manager itself (contributing code)
 - ✅ Understanding internal architecture
 - ✅ Package organization, registry system, port allocation logic
@@ -2936,7 +2936,7 @@ You can now create real feature worktrees:
 
 **For Contributors:**
 - See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines
-- See [CLAUDE.md](CLAUDE.md) for architecture
+- See [AGENTS.md](AGENTS.md) for architecture
 
 **Version Information:**
 ```bash
