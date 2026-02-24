@@ -6,6 +6,61 @@
 
 ---
 
+## ⚡ AGENT ENTRY POINT — Start Here
+
+> **If you are an AI agent who just loaded this file, follow this protocol immediately.**
+
+### Step 1: Explore the project structure
+
+Run these commands first — don't ask, just do it:
+
+```bash
+ls -la                              # What directories exist?
+find . -maxdepth 2 -name ".git" -type d  # Which are git repos?
+find . -maxdepth 2 -name "docker-compose.yml" -o -name "package.json" -o -name "go.mod" | head -20
+```
+
+### Step 2: Say this to the user
+
+```
+I found these potential projects in your workspace: [list from ls output]
+
+To set up worktree-manager, I need to know a few things:
+1. What should I name your project? (used for Docker container naming, e.g. "myapp")
+2. Which directories are the projects you want to manage? (e.g., backend/, frontend/)
+3. Do you work on multiple features simultaneously, or one at a time?
+```
+
+### Step 3: Follow the wizard
+
+Use **Section 3 (Configuration Wizard)** as your guide:
+- Section 3.1 → Basic info (project name, hostname, default preset)
+- Section 3.2 → Discover and configure each project
+- Section 3.3 → Design presets
+- Section 3.4 → Configure ports (**critical — read carefully**)
+
+### Step 4: Fetch the example config for reference
+
+Before writing `.worktree.yml`, fetch the official example to use as a reference for correct syntax:
+
+```bash
+curl -s "https://raw.githubusercontent.com/braunmar/worktree/main/.worktree.example.yml"
+```
+
+Use it as your syntax reference. Section 6 also has ready-made copy-paste patterns for common setups.
+
+### Step 5: Generate and write `.worktree.yml`
+
+Once you have enough info, generate the config file based on what you learned from the user and the example.
+
+### Step 6: Validate
+
+Run `worktree new-feature test/validation` and verify it works. Remove it after.
+
+> **Reference sections below as needed. The full workflow summary is in the Appendix.**
+
+---
+
 ## Table of Contents
 
 1. [Overview and Quick Context](#1-overview-and-quick-context)
@@ -145,7 +200,11 @@ $ worktree ports feature-a  # See port allocations
 
 ### 1.7 AI Action Points
 
-**Before proceeding, AI should:**
+> **If you reached this section while setting up worktree-manager, go back to the ⚡ AGENT ENTRY POINT at the top.** This section is for context only — it describes when to recommend the tool, not how to set it up.
+
+**This section applies when you are suggesting worktree-manager to a user who hasn't asked for it. If the user already asked you to set it up, skip to Section 2.**
+
+**Before recommending, AI should:**
 
 1. ✅ Confirm project matches "When to Recommend" criteria
 2. ✅ Ask user: "Do you work on multiple features simultaneously?"
@@ -474,6 +533,12 @@ Prerequisites Checklist:
 
 This is the **PRIMARY** section. Follow this step-by-step process to build `.worktree.yml` through AI-user dialogue.
 
+> **Before starting the wizard:** Fetch the official example config for syntax reference — it has inline comments explaining every field:
+> ```bash
+> curl -s "https://raw.githubusercontent.com/braunmar/worktree/main/.worktree.example.yml"
+> ```
+> Read it once, then use it alongside this wizard when writing the final `.worktree.yml`.
+
 ### 3.1 Basic Information
 
 **Goal:** Gather project name, hostname, and default preset.
@@ -620,15 +685,16 @@ User: make migrate && make seed
 AI: ✓ start_post_command: "make migrate && make seed"
 ```
 
-**Q6: Is this your main working directory?** (Claude Code only)
+**Q6: Is this your main working directory?** (Claude Code only — optional)
 ```
-AI: Will you primarily work in {project}/ when Claude Code starts?
+AI: Will you primarily work in {project}/ when Claude Code starts a new worktree?
+    (Press Enter to skip — Claude will just stay in the worktree root)
 
-User: Yes
-
-AI: ✓ claude_working_dir: true
-    Claude will navigate here after setup completes.
+User: Yes → set claude_working_dir: true for that project
+User: No / Enter → omit this field entirely (most users prefer this)
 ```
+
+> **Note:** Most users do NOT set `claude_working_dir`. Omit this field unless the user explicitly wants Claude to navigate to a specific project directory after `worktree new-feature` runs. Default behavior keeps Claude in the worktree root.
 
 #### Step 3: Executor Type Decision Tree
 
@@ -2898,8 +2964,10 @@ You can now create real feature worktrees:
 ### 10.1 Documentation
 
 - **[README.md](README.md)** - Quick start, installation, overview
-- **[.worktree.example.yml](.worktree.example.yml)** - Complete example configuration with 493 lines of comments
+- **[.worktree.example.yml](.worktree.example.yml)** - Complete example configuration with inline comments
+  - Fetch via: `curl -s "https://raw.githubusercontent.com/braunmar/worktree/main/.worktree.example.yml"`
 - **[.worktree.example-real.yml](.worktree.example-real.yml)** - Real-world configuration from project
+  - Fetch via: `curl -s "https://raw.githubusercontent.com/braunmar/worktree/main/.worktree.example-real.yml"`
 - **[AGENTS.md](AGENTS.md)** - Architecture, development patterns, package organization (for developers)
 - **[CONTRIBUTING.md](CONTRIBUTING.md)** - Contribution guidelines, code style, architecture
 - **[examples/](examples/)** - Practical examples and tutorials
@@ -2946,6 +3014,8 @@ worktree --version
 ---
 
 ## Appendix: AI Workflow Summary
+
+> **Starting fresh?** Go to the **⚡ AGENT ENTRY POINT** at the very top of this file. It tells you exactly what to do without reading everything.
 
 **High-Level AI Workflow for Setting Up Worktree-Manager:**
 
