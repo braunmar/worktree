@@ -3,14 +3,18 @@
 # Default target
 .DEFAULT_GOAL := help
 
+VERSION  := $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
+COMMIT   := $(shell git rev-parse --short HEAD 2>/dev/null || echo "none")
+LDFLAGS  := -ldflags "-X github.com/braunmar/worktree/cmd.version=$(VERSION) -X github.com/braunmar/worktree/cmd.commit=$(COMMIT)"
+
 build: ## Build the worktree binary
 	@echo "🔨 Building worktree manager..."
-	@go build -o ./worktree .
+	@go build $(LDFLAGS) -o ./worktree .
 	@echo "✅ Binary built: worktree"
 
 install: ## Install using go install (installs to $GOBIN or ~/go/bin)
 	@echo "🔧 Installing worktree using go install..."
-	@go install .
+	@go install $(LDFLAGS) .
 	@GOBIN=$${GOBIN:-$$(go env GOPATH)/bin}; \
 	echo "✅ Installed to: $$GOBIN/worktree"; \
 	echo ""; \
@@ -25,7 +29,7 @@ install: ## Install using go install (installs to $GOBIN or ~/go/bin)
 
 install-global: ## Install binary to /usr/local/bin (requires sudo)
 	@echo "🔧 Installing worktree to /usr/local/bin..."
-	@sudo go build -o /usr/local/bin/worktree .
+	@sudo go build $(LDFLAGS) -o /usr/local/bin/worktree .
 	@echo "✅ Installed: /usr/local/bin/worktree"
 	@echo ""
 	@echo "You can now use: worktree <command>"
@@ -33,7 +37,7 @@ install-global: ## Install binary to /usr/local/bin (requires sudo)
 install-user: ## Install binary to ~/.local/bin (no sudo required)
 	@echo "🔧 Installing worktree to ~/.local/bin..."
 	@mkdir -p ~/.local/bin
-	@go build -o ~/.local/bin/worktree .
+	@go build $(LDFLAGS) -o ~/.local/bin/worktree .
 	@echo "✅ Installed: ~/.local/bin/worktree"
 	@echo ""
 	@if echo $$PATH | grep -q "$$HOME/.local/bin"; then \

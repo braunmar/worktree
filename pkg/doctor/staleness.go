@@ -11,8 +11,9 @@ import (
 	"time"
 )
 
-// CheckStaleness checks if a worktree is stale based on multiple criteria
-func CheckStaleness(cfg *config.Config, wt *registry.Worktree, projectName string) StalenessReport {
+// CheckStaleness checks if a worktree is stale based on multiple criteria.
+// projectPath is the path to the first project directory within the worktree (used for git operations).
+func CheckStaleness(cfg *config.Config, wt *registry.Worktree, projectName string, projectPath string) StalenessReport {
 	report := StalenessReport{
 		Feature: wt.Normalized,
 		Branch:  wt.Branch,
@@ -24,8 +25,7 @@ func CheckStaleness(cfg *config.Config, wt *registry.Worktree, projectName strin
 	}
 
 	// Check last modified time
-	backendPath := cfg.WorktreeBackendPath(wt.Normalized)
-	if info, err := os.Stat(backendPath); err == nil {
+	if info, err := os.Stat(projectPath); err == nil {
 		report.LastModified = info.ModTime()
 		report.DaysSinceModified = int(time.Since(info.ModTime()).Hours() / 24)
 		if report.DaysSinceModified >= 7 {
@@ -34,7 +34,7 @@ func CheckStaleness(cfg *config.Config, wt *registry.Worktree, projectName strin
 	}
 
 	// Check if branch merged to main
-	mergeCheckCmd := exec.Command("git", "-C", backendPath, "branch", "--merged", "origin/main", "--format=%(refname:short)")
+	mergeCheckCmd := exec.Command("git", "-C", projectPath, "branch", "--merged", "origin/main", "--format=%(refname:short)")
 	var mergeOut bytes.Buffer
 	mergeCheckCmd.Stdout = &mergeOut
 	if err := mergeCheckCmd.Run(); err == nil {
@@ -46,7 +46,7 @@ func CheckStaleness(cfg *config.Config, wt *registry.Worktree, projectName strin
 				report.Score++
 
 				// Get merge date (when was the last commit)
-				mergeDate := exec.Command("git", "-C", backendPath, "log", "-1", "--format=%ar", wt.Branch)
+				mergeDate := exec.Command("git", "-C", projectPath, "log", "-1", "--format=%ar", wt.Branch)
 				var dateOut bytes.Buffer
 				mergeDate.Stdout = &dateOut
 				if err := mergeDate.Run(); err == nil {

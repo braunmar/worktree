@@ -1,6 +1,8 @@
 package doctor
 
 import (
+	"path/filepath"
+
 	"github.com/braunmar/worktree/pkg/config"
 	"github.com/braunmar/worktree/pkg/docker"
 	"github.com/braunmar/worktree/pkg/registry"
@@ -19,15 +21,20 @@ func RunHealthCheck(cfg *config.Config, workCfg *config.WorktreeConfig, reg *reg
 	// 3. Get worktrees to check
 	worktrees := filterWorktrees(reg.List(), opts.FeatureFilter)
 
+	// Determine the first project directory for git/staleness checks
+	firstProjectDir := workCfg.GetFirstProjectDir()
+
 	// 4. Check git status for each worktree
 	for _, wt := range worktrees {
-		gitReport := CheckGitStatus(cfg, wt, !opts.NoFetch)
+		projectPath := filepath.Join(cfg.WorktreeFeaturePath(wt.Normalized), firstProjectDir)
+		gitReport := CheckGitStatus(cfg, wt, projectPath, !opts.NoFetch)
 		report.GitStatus = append(report.GitStatus, gitReport)
 	}
 
 	// 5. Check staleness for each worktree
 	for _, wt := range worktrees {
-		stalenessReport := CheckStaleness(cfg, wt, workCfg.ProjectName)
+		projectPath := filepath.Join(cfg.WorktreeFeaturePath(wt.Normalized), firstProjectDir)
+		stalenessReport := CheckStaleness(cfg, wt, workCfg.ProjectName, projectPath)
 		// Only include worktrees with some staleness
 		if stalenessReport.Score > 0 {
 			report.Staleness = append(report.Staleness, stalenessReport)

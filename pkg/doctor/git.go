@@ -11,15 +11,13 @@ import (
 	"strings"
 )
 
-// CheckGitStatus checks git status for a worktree
-func CheckGitStatus(cfg *config.Config, wt *registry.Worktree, fetch bool) GitStatusReport {
+// CheckGitStatus checks git status for a worktree using the given project path as the git directory.
+func CheckGitStatus(cfg *config.Config, wt *registry.Worktree, projectPath string, fetch bool) GitStatusReport {
 	report := GitStatusReport{
 		Feature:  wt.Normalized,
 		Branch:   wt.Branch,
 		YoloMode: wt.YoloMode,
 	}
-
-	backendPath := cfg.WorktreeBackendPath(wt.Normalized)
 
 	// Check if directory exists
 	if !cfg.WorktreeExists(wt.Normalized) {
@@ -28,7 +26,7 @@ func CheckGitStatus(cfg *config.Config, wt *registry.Worktree, fetch bool) GitSt
 	}
 
 	// Get current branch
-	branch, err := git.GetWorktreeBranch(backendPath)
+	branch, err := git.GetWorktreeBranch(projectPath)
 	if err != nil {
 		report.Error = fmt.Sprintf("Failed to get branch: %v", err)
 		return report
@@ -37,19 +35,19 @@ func CheckGitStatus(cfg *config.Config, wt *registry.Worktree, fetch bool) GitSt
 	report.Branch = branch
 
 	// Check uncommitted changes
-	count, err := git.GetUncommittedChangesCount(backendPath)
+	count, err := git.GetUncommittedChangesCount(projectPath)
 	if err == nil {
 		report.UncommittedCount = count
 	}
 
 	// Fetch if requested
 	if fetch {
-		fetchCmd := exec.Command("git", "-C", backendPath, "fetch", "origin")
+		fetchCmd := exec.Command("git", "-C", projectPath, "fetch", "origin")
 		fetchCmd.Run() // Ignore errors (might be offline)
 	}
 
 	// Check how far behind origin/main
-	behindCmd := exec.Command("git", "-C", backendPath, "rev-list", "--count", fmt.Sprintf("%s..origin/main", branch))
+	behindCmd := exec.Command("git", "-C", projectPath, "rev-list", "--count", fmt.Sprintf("%s..origin/main", branch))
 	var behindOut bytes.Buffer
 	behindCmd.Stdout = &behindOut
 	if err := behindCmd.Run(); err == nil {
@@ -59,7 +57,7 @@ func CheckGitStatus(cfg *config.Config, wt *registry.Worktree, fetch bool) GitSt
 	}
 
 	// Check how far ahead of origin
-	aheadCmd := exec.Command("git", "-C", backendPath, "rev-list", "--count", fmt.Sprintf("origin/%s..%s", branch, branch))
+	aheadCmd := exec.Command("git", "-C", projectPath, "rev-list", "--count", fmt.Sprintf("origin/%s..%s", branch, branch))
 	var aheadOut bytes.Buffer
 	aheadCmd.Stdout = &aheadOut
 	if err := aheadCmd.Run(); err == nil {

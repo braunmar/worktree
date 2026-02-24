@@ -120,11 +120,13 @@ func runNewFeature(cmd *cobra.Command, args []string) {
 		ui.Info(fmt.Sprintf("Allocated ports: %v", ports))
 	}
 
-	// Calculate INSTANCE from allocated APP_PORT (base port is 8080)
-	appPortCfg := workCfg.EnvVariables["APP_PORT"]
-	basePort, err := config.ExtractBasePort(appPortCfg.Port)
+	// Calculate INSTANCE from the first allocated ranged port
+	instancePortName, err := workCfg.GetInstancePortName()
 	checkError(err)
-	instance := ports["APP_PORT"] - basePort
+	instancePortCfg := workCfg.EnvVariables[instancePortName]
+	basePort, err := config.ExtractBasePort(instancePortCfg.Port)
+	checkError(err)
+	instance := ports[instancePortName] - basePort
 
 	// Display allocated ports
 	ui.CheckMark("Ports allocated")

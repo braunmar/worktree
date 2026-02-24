@@ -7,7 +7,10 @@ import (
 	"github.com/spf13/cobra"
 )
 
-const version = "1.0.0"
+var (
+	version = "dev"  // overridden by -ldflags at build time
+	commit  = "none" // overridden by -ldflags at build time
+)
 
 var rootCmd = &cobra.Command{
 	Use:   "worktree",
@@ -16,7 +19,7 @@ var rootCmd = &cobra.Command{
 
 This tool helps you create, manage, and remove coordinated git worktrees for multiple
 projects, integrated with multi-instance Docker setups.`,
-	Version: version,
+	Version: version + " (" + commit + ")",
 }
 
 // Execute runs the root command
