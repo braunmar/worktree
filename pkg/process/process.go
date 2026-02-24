@@ -1,3 +1,5 @@
+//go:build !windows
+
 package process
 
 import (
@@ -5,7 +7,6 @@ import (
 	"os"
 	"os/exec"
 	"strconv"
-	"strings"
 	"syscall"
 	"time"
 )
@@ -78,19 +79,6 @@ func IsRunning(pidFile string) bool {
 		return false
 	}
 	return isAlive(pid)
-}
-
-// readPID reads a PID from a file created by StartBackground.
-func readPID(pidFile string) (int, error) {
-	data, err := os.ReadFile(pidFile)
-	if err != nil {
-		return 0, fmt.Errorf("PID file not found: %w", err)
-	}
-	pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
-	if err != nil {
-		return 0, fmt.Errorf("invalid PID in file %s: %w", pidFile, err)
-	}
-	return pid, nil
 }
 
 // isAlive checks whether a process with the given PID is running by sending

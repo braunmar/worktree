@@ -1,4 +1,5 @@
-.PHONY: build install install-global install-user uninstall clean test test-coverage test-system test-system-coverage test-all test-all-coverage help tidy fmt vet
+.PHONY: build install install-global install-user uninstall clean test test-coverage test-system test-system-coverage test-all test-all-coverage help tidy fmt vet \
+        build-linux-amd64 build-linux-arm64 build-darwin-amd64 build-darwin-arm64 build-windows-amd64 build-all
 
 # Default target
 .DEFAULT_GOAL := help
@@ -63,9 +64,43 @@ uninstall: ## Uninstall binary from system
 	fi; \
 	echo "✅ Uninstall complete"
 
-clean: ## Remove built binary
+build-linux-amd64: ## Build for Linux AMD64
+	@echo "🔨 Building for linux/amd64..."
+	@mkdir -p dist
+	@GOOS=linux GOARCH=amd64 go build $(LDFLAGS) -o dist/worktree-linux-amd64 .
+	@echo "✅ dist/worktree-linux-amd64"
+
+build-linux-arm64: ## Build for Linux ARM64
+	@echo "🔨 Building for linux/arm64..."
+	@mkdir -p dist
+	@GOOS=linux GOARCH=arm64 go build $(LDFLAGS) -o dist/worktree-linux-arm64 .
+	@echo "✅ dist/worktree-linux-arm64"
+
+build-darwin-amd64: ## Build for macOS AMD64 (Intel)
+	@echo "🔨 Building for darwin/amd64..."
+	@mkdir -p dist
+	@GOOS=darwin GOARCH=amd64 go build $(LDFLAGS) -o dist/worktree-darwin-amd64 .
+	@echo "✅ dist/worktree-darwin-amd64"
+
+build-darwin-arm64: ## Build for macOS ARM64 (Apple Silicon)
+	@echo "🔨 Building for darwin/arm64..."
+	@mkdir -p dist
+	@GOOS=darwin GOARCH=arm64 go build $(LDFLAGS) -o dist/worktree-darwin-arm64 .
+	@echo "✅ dist/worktree-darwin-arm64"
+
+build-windows-amd64: ## Build for Windows AMD64
+	@echo "🔨 Building for windows/amd64..."
+	@mkdir -p dist
+	@GOOS=windows GOARCH=amd64 go build $(LDFLAGS) -o dist/worktree-windows-amd64.exe .
+	@echo "✅ dist/worktree-windows-amd64.exe"
+
+build-all: build-linux-amd64 build-linux-arm64 build-darwin-amd64 build-darwin-arm64 build-windows-amd64 ## Build for all platforms (output in dist/)
+	@echo "✅ All platforms built in dist/"
+
+clean: ## Remove built binary and dist/
 	@echo "🧹 Cleaning up..."
 	@rm -f ./worktree
+	@rm -rf ./dist
 	@echo "✅ Cleaned"
 
 test: ## Run unit tests (pkg/ only)
@@ -123,5 +158,5 @@ vet: ## Vet code
 help: ## Show this help
 	@echo "Worktree Manager - Makefile targets:"
 	@echo ""
-	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}'
+	@grep -E '^[a-zA-Z0-9_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-22s\033[0m %s\n", $$1, $$2}'
 	@echo ""
