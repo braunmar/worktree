@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"runtime/debug"
 
 	"github.com/spf13/cobra"
 )
@@ -19,7 +20,6 @@ var rootCmd = &cobra.Command{
 
 This tool helps you create, manage, and remove coordinated git worktrees for multiple
 projects, integrated with multi-instance Docker setups.`,
-	Version: version + " (" + commit + ")",
 }
 
 // Execute runs the root command
@@ -28,6 +28,23 @@ func Execute() error {
 }
 
 func init() {
+	// Resolve version: ldflags take priority, then module build info (go install @version),
+	// then VCS info embedded by go build (vcs.revision setting).
+	if info, ok := debug.ReadBuildInfo(); ok {
+		if version == "dev" && info.Main.Version != "" && info.Main.Version != "(devel)" {
+			version = info.Main.Version
+		}
+		if commit == "none" {
+			for _, s := range info.Settings {
+				if s.Key == "vcs.revision" && len(s.Value) >= 7 {
+					commit = s.Value[:7]
+					break
+				}
+			}
+		}
+	}
+	rootCmd.Version = version + " (" + commit + ")"
+
 	// Add global flags
 	rootCmd.PersistentFlags().BoolP("verbose", "v", false, "verbose output")
 
