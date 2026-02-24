@@ -25,7 +25,9 @@ jobs:
 
       - name: Get version from tag
         id: get_version
-        run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+        run: |
+          echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+          echo "COMMIT=${GITHUB_SHA::7}" >> $GITHUB_OUTPUT
 
       - name: Run tests
         run: make test-all
@@ -33,19 +35,19 @@ jobs:
       - name: Build binaries
         run: |
           # Linux AMD64
-          GOOS=linux GOARCH=amd64 go build -ldflags="-s -w -X main.version=${{ steps.get_version.outputs.VERSION }}" -o dist/worktree-linux-amd64 .
+          GOOS=linux GOARCH=amd64 go build -ldflags="-s -w -X github.com/braunmar/worktree/cmd.version=${{ steps.get_version.outputs.VERSION }} -X github.com/braunmar/worktree/cmd.commit=${{ steps.get_version.outputs.COMMIT }}" -o dist/worktree-linux-amd64 .
 
           # Linux ARM64
-          GOOS=linux GOARCH=arm64 go build -ldflags="-s -w -X main.version=${{ steps.get_version.outputs.VERSION }}" -o dist/worktree-linux-arm64 .
+          GOOS=linux GOARCH=arm64 go build -ldflags="-s -w -X github.com/braunmar/worktree/cmd.version=${{ steps.get_version.outputs.VERSION }} -X github.com/braunmar/worktree/cmd.commit=${{ steps.get_version.outputs.COMMIT }}" -o dist/worktree-linux-arm64 .
 
           # macOS AMD64
-          GOOS=darwin GOARCH=amd64 go build -ldflags="-s -w -X main.version=${{ steps.get_version.outputs.VERSION }}" -o dist/worktree-darwin-amd64 .
+          GOOS=darwin GOARCH=amd64 go build -ldflags="-s -w -X github.com/braunmar/worktree/cmd.version=${{ steps.get_version.outputs.VERSION }} -X github.com/braunmar/worktree/cmd.commit=${{ steps.get_version.outputs.COMMIT }}" -o dist/worktree-darwin-amd64 .
 
           # macOS ARM64 (Apple Silicon)
-          GOOS=darwin GOARCH=arm64 go build -ldflags="-s -w -X main.version=${{ steps.get_version.outputs.VERSION }}" -o dist/worktree-darwin-arm64 .
+          GOOS=darwin GOARCH=arm64 go build -ldflags="-s -w -X github.com/braunmar/worktree/cmd.version=${{ steps.get_version.outputs.VERSION }} -X github.com/braunmar/worktree/cmd.commit=${{ steps.get_version.outputs.COMMIT }}" -o dist/worktree-darwin-arm64 .
 
           # Windows AMD64
-          GOOS=windows GOARCH=amd64 go build -ldflags="-s -w -X main.version=${{ steps.get_version.outputs.VERSION }}" -o dist/worktree-windows-amd64.exe .
+          GOOS=windows GOARCH=amd64 go build -ldflags="-s -w -X github.com/braunmar/worktree/cmd.version=${{ steps.get_version.outputs.VERSION }} -X github.com/braunmar/worktree/cmd.commit=${{ steps.get_version.outputs.COMMIT }}" -o dist/worktree-windows-amd64.exe .
 
       - name: Create checksums
         run: |
@@ -77,6 +79,7 @@ jobs:
           body_path: release_notes.md
           files: |
             dist/worktree-*
+            dist/checksums.txt
           draft: false
           prerelease: ${{ contains(github.ref, 'alpha') || contains(github.ref, 'beta') || contains(github.ref, 'rc') }}
         env:
