@@ -956,6 +956,98 @@ presets:
 	})
 }
 
+// TestProjectConfigPerProjectLinks tests per-project symlinks and copies parsing from YAML
+func TestProjectConfigPerProjectLinks(t *testing.T) {
+	t.Run("per-project symlinks and copies are parsed", func(t *testing.T) {
+		dir := t.TempDir()
+		content := `project_name: testproject
+projects:
+  backend:
+    dir: backend
+    symlinks:
+      - source: ".env.backend.shared"
+        target: ".env"
+    copies:
+      - source: "config/template.yml"
+        target: "config/local.yml"
+  frontend:
+    dir: frontend
+    symlinks:
+      - source: ".env.frontend.shared"
+        target: ".env.local"
+presets:
+  default:
+    projects: [backend, frontend]
+default_preset: default
+`
+		if err := os.WriteFile(filepath.Join(dir, ".worktree.yml"), []byte(content), 0644); err != nil {
+			t.Fatal(err)
+		}
+
+		cfg, err := LoadWorktreeConfig(dir)
+		if err != nil {
+			t.Fatalf("LoadWorktreeConfig() error = %v", err)
+		}
+
+		backend := cfg.Projects["backend"]
+		if len(backend.Symlinks) != 1 {
+			t.Fatalf("backend.Symlinks: got %d, want 1", len(backend.Symlinks))
+		}
+		if backend.Symlinks[0].Source != ".env.backend.shared" {
+			t.Errorf("backend.Symlinks[0].Source = %q, want %q", backend.Symlinks[0].Source, ".env.backend.shared")
+		}
+		if backend.Symlinks[0].Target != ".env" {
+			t.Errorf("backend.Symlinks[0].Target = %q, want %q", backend.Symlinks[0].Target, ".env")
+		}
+		if len(backend.Copies) != 1 {
+			t.Fatalf("backend.Copies: got %d, want 1", len(backend.Copies))
+		}
+		if backend.Copies[0].Source != "config/template.yml" {
+			t.Errorf("backend.Copies[0].Source = %q, want %q", backend.Copies[0].Source, "config/template.yml")
+		}
+
+		frontend := cfg.Projects["frontend"]
+		if len(frontend.Symlinks) != 1 {
+			t.Fatalf("frontend.Symlinks: got %d, want 1", len(frontend.Symlinks))
+		}
+		if frontend.Symlinks[0].Target != ".env.local" {
+			t.Errorf("frontend.Symlinks[0].Target = %q, want %q", frontend.Symlinks[0].Target, ".env.local")
+		}
+		if len(frontend.Copies) != 0 {
+			t.Errorf("frontend.Copies: got %d, want 0", len(frontend.Copies))
+		}
+	})
+
+	t.Run("projects without per-project links have empty slices", func(t *testing.T) {
+		dir := t.TempDir()
+		content := `project_name: testproject
+projects:
+  backend:
+    dir: backend
+presets:
+  default:
+    projects: [backend]
+default_preset: default
+`
+		if err := os.WriteFile(filepath.Join(dir, ".worktree.yml"), []byte(content), 0644); err != nil {
+			t.Fatal(err)
+		}
+
+		cfg, err := LoadWorktreeConfig(dir)
+		if err != nil {
+			t.Fatalf("LoadWorktreeConfig() error = %v", err)
+		}
+
+		backend := cfg.Projects["backend"]
+		if len(backend.Symlinks) != 0 {
+			t.Errorf("backend.Symlinks: got %d, want 0", len(backend.Symlinks))
+		}
+		if len(backend.Copies) != 0 {
+			t.Errorf("backend.Copies: got %d, want 0", len(backend.Copies))
+		}
+	})
+}
+
 // TestGetPreset tests preset retrieval
 func TestGetPreset(t *testing.T) {
 	cfg := &WorktreeConfig{

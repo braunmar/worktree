@@ -247,6 +247,83 @@ func runNewFeature(cmd *cobra.Command, args []string) {
 		ui.NewLine()
 	}
 
+	// Per-project symlinks and copies (inside each project's worktree dir)
+	hasProjectLinks := false
+	for _, projectName := range presetCfg.Projects {
+		project := workCfg.Projects[projectName]
+		if len(project.Symlinks) > 0 || len(project.Copies) > 0 {
+			hasProjectLinks = true
+			break
+		}
+	}
+
+	if hasProjectLinks {
+		ui.Section("Creating project-specific files...")
+		// Relative path from worktrees/feature-name/project-dir/ to project root is 3 levels up
+		relPathToRootProject := config.CalculateRelativePath(3)
+
+		for _, projectName := range presetCfg.Projects {
+			project := workCfg.Projects[projectName]
+			projectWorktreePath := featureDir + "/" + project.Dir
+
+			for _, link := range project.Symlinks {
+				sourcePath := relPathToRootProject + "/" + link.Source
+				targetPath := projectWorktreePath + "/" + link.Target
+
+				if info, err := os.Lstat(targetPath); err == nil {
+					if info.Mode()&os.ModeSymlink != 0 {
+						os.Remove(targetPath)
+					} else {
+						backupPath := targetPath + ".backup." + time.Now().Format("20060102-150405")
+						if err := os.Rename(targetPath, backupPath); err != nil {
+							ui.Warning(fmt.Sprintf("[%s] Failed to backup %s: %v", projectName, link.Target, err))
+							continue
+						}
+						ui.Info(fmt.Sprintf("[%s] Backed up existing %s", projectName, link.Target))
+					}
+				}
+
+				if err := os.Symlink(sourcePath, targetPath); err != nil {
+					ui.Warning(fmt.Sprintf("[%s] Failed to symlink %s: %v", projectName, link.Target, err))
+				} else {
+					ui.CheckMark(fmt.Sprintf("[%s] Linked %s -> %s", projectName, link.Target, link.Source))
+				}
+			}
+
+			for _, cp := range project.Copies {
+				sourcePath := cfg.ProjectRoot + "/" + cp.Source
+				targetPath := projectWorktreePath + "/" + cp.Target
+
+				sourceInfo, err := os.Stat(sourcePath)
+				if os.IsNotExist(err) {
+					ui.Warning(fmt.Sprintf("[%s] Source not found: %s", projectName, cp.Source))
+					continue
+				}
+
+				if sourceInfo.IsDir() {
+					cpCmd := exec.Command("cp", "-R", sourcePath, targetPath)
+					if err := cpCmd.Run(); err != nil {
+						ui.Warning(fmt.Sprintf("[%s] Failed to copy dir %s: %v", projectName, cp.Source, err))
+					} else {
+						ui.CheckMark(fmt.Sprintf("[%s] Copied dir %s -> %s", projectName, cp.Source, cp.Target))
+					}
+				} else {
+					data, err := os.ReadFile(sourcePath)
+					if err != nil {
+						ui.Warning(fmt.Sprintf("[%s] Failed to read %s: %v", projectName, cp.Source, err))
+						continue
+					}
+					if err := os.WriteFile(targetPath, data, 0644); err != nil {
+						ui.Warning(fmt.Sprintf("[%s] Failed to write %s: %v", projectName, cp.Target, err))
+					} else {
+						ui.CheckMark(fmt.Sprintf("[%s] Copied %s -> %s", projectName, cp.Source, cp.Target))
+					}
+				}
+			}
+		}
+		ui.NewLine()
+	}
+
 	// Generate compose project names for each service
 	template := workCfg.GetComposeProjectTemplate()
 	composeProjects := make(map[string]string)
@@ -486,7 +563,7 @@ func displayDryRunPreview(featureName string, instance int, ports map[string]int
 
 	// Symlinks
 	if len(workCfg.Symlinks) > 0 {
-		fmt.Println("Symlinks to create:")
+		fmt.Println("Symlinks to create (feature root):")
 		for _, link := range workCfg.Symlinks {
 			ui.CheckMark(fmt.Sprintf("%s -> %s", link.Target, link.Source))
 		}
@@ -495,11 +572,30 @@ func displayDryRunPreview(featureName string, instance int, ports map[string]int
 
 	// Copies
 	if len(workCfg.Copies) > 0 {
-		fmt.Println("Files to copy:")
+		fmt.Println("Files to copy (feature root):")
 		for _, copy := range workCfg.Copies {
 			ui.CheckMark(fmt.Sprintf("%s -> %s", copy.Source, copy.Target))
 		}
 		ui.NewLine()
+	}
+
+	// Per-project symlinks and copies
+	for _, projectName := range presetCfg.Projects {
+		project := workCfg.Projects[projectName]
+		if len(project.Symlinks) > 0 {
+			fmt.Printf("Symlinks to create (%s/):\n", projectName)
+			for _, link := range project.Symlinks {
+				ui.CheckMark(fmt.Sprintf("%s/%s -> %s", project.Dir, link.Target, link.Source))
+			}
+			ui.NewLine()
+		}
+		if len(project.Copies) > 0 {
+			fmt.Printf("Files to copy (%s/):\n", projectName)
+			for _, cp := range project.Copies {
+				ui.CheckMark(fmt.Sprintf("%s -> %s/%s", cp.Source, project.Dir, cp.Target))
+			}
+			ui.NewLine()
+		}
 	}
 
 	// Services to start

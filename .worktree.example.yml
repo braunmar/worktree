@@ -72,6 +72,16 @@ projects:
     restart_pre_command: "make backup-state"       # Optional: runs before stop during restart
     restart_post_command: "make verify-health"     # Optional: runs after start during restart
     claude_working_dir: true                       # Set as Claude's working directory
+    # Per-project symlinks (created inside worktrees/feature-name/backend/)
+    # Source is relative to project root; target is relative to the project's worktree dir.
+    # Use instead of global symlinks when a file is only needed in one project.
+    symlinks:
+      # - source: ".env.backend.shared"           # Shared backend env — symlink into every worktree
+      #   target: ".env"
+    # Per-project copies (same path conventions as symlinks, but file is copied not linked)
+    copies:
+      # - source: "config/backend.template.yml"   # Template copied fresh per worktree
+      #   target: "config/local.yml"
 
   # Example: Frontend app (process executor — no Docker needed)
   frontend:
@@ -80,6 +90,9 @@ projects:
     main_branch: main
     start_command: "npm start"
     start_post_command: "npm run generate-types"  # Optional: generate types after start
+    symlinks:
+      # - source: ".env.frontend.shared"          # Shared frontend env — symlink into every worktree
+      #   target: ".env.local"
 
   # Example: Go microservice (process executor)
   api:

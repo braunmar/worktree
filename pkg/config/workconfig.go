@@ -44,17 +44,19 @@ type EnvVarConfig struct {
 
 // ProjectConfig represents a single project configuration
 type ProjectConfig struct {
-	Executor           string `yaml:"executor"` // "docker" (default) or "process"
-	Dir                string `yaml:"dir"`
-	MainBranch         string `yaml:"main_branch"`
-	StartPreCommand    string `yaml:"start_pre_command"` // Runs before start_command
-	StartCommand       string `yaml:"start_command"`
-	StartPostCommand   string `yaml:"start_post_command"`   // Runs after start_command (fixtures, seed, etc.)
-	StopPreCommand     string `yaml:"stop_pre_command"`     // Runs before stopping services
-	StopPostCommand    string `yaml:"stop_post_command"`    // Runs after stopping services
-	RestartPreCommand  string `yaml:"restart_pre_command"`  // Runs before the full restart cycle
-	RestartPostCommand string `yaml:"restart_post_command"` // Runs after the full restart cycle
-	ClaudeWorkingDir   bool   `yaml:"claude_working_dir"`
+	Executor           string     `yaml:"executor"` // "docker" (default) or "process"
+	Dir                string     `yaml:"dir"`
+	MainBranch         string     `yaml:"main_branch"`
+	StartPreCommand    string     `yaml:"start_pre_command"` // Runs before start_command
+	StartCommand       string     `yaml:"start_command"`
+	StartPostCommand   string     `yaml:"start_post_command"`   // Runs after start_command (fixtures, seed, etc.)
+	StopPreCommand     string     `yaml:"stop_pre_command"`     // Runs before stopping services
+	StopPostCommand    string     `yaml:"stop_post_command"`    // Runs after stopping services
+	RestartPreCommand  string     `yaml:"restart_pre_command"`  // Runs before the full restart cycle
+	RestartPostCommand string     `yaml:"restart_post_command"` // Runs after the full restart cycle
+	ClaudeWorkingDir   bool       `yaml:"claude_working_dir"`
+	Symlinks           []FileLink `yaml:"symlinks"` // Symlinks created inside this project's worktree dir
+	Copies             []FileLink `yaml:"copies"`   // Files copied into this project's worktree dir
 }
 
 // GetExecutor returns the executor type, defaulting to "docker" if not set.
