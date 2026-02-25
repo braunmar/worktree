@@ -1,4 +1,4 @@
-.PHONY: build install install-global install-user uninstall clean test test-coverage test-system test-system-coverage test-all test-all-coverage help tidy fmt vet \
+.PHONY: build install install-global install-user uninstall clean test test-coverage test-system test-system-coverage test-all test-all-coverage help tidy fmt vet lint-all \
         build-linux-amd64 build-linux-arm64 build-darwin-amd64 build-darwin-arm64 build-windows-amd64 build-all
 
 # Default target
@@ -154,6 +154,9 @@ vet: ## Vet code
 	@echo "🔍 Vetting code..."
 	@go vet ./...
 	@echo "✅ Done"
+
+lint-all: tidy fmt vet ## Run all lint/format steps (tidy, fmt, vet)
+	@echo "✅ All lint steps complete"
 
 help: ## Show this help
 	@echo "Worktree Manager - Makefile targets:"

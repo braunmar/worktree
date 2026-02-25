@@ -502,4 +502,3 @@ func TestComputedVars_NilWhenNotSet(t *testing.T) {
 		t.Errorf("expected nil/empty ComputedVars for legacy entry, got %v", loaded.ComputedVars)
 	}
 }
-
