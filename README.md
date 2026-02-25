@@ -93,12 +93,41 @@ New to worktree-manager? Start with a hands-on example:
 - **[Architecture](AGENTS.md)** - For contributors and AI agents
 - **[AI Agent Setup](SKILL.md)** - Configuration wizard for AI agents
 
+### Installing as a Claude Code Skill
+
+You can expose this SKILL.md as a `/worktree` slash command in Claude Code so any session can trigger the setup wizard or debug workflow without manually loading this file.
+
+**Install the skill:**
+
+```bash
+# Create skill directory in your project's .claude folder
+mkdir -p .claude/skills/worktree
+# Copy the companion skill wrapper from the worktree-manager repo
+curl -fsSL "https://raw.githubusercontent.com/braunmar/worktree/main/.claude/skills/worktree/SKILL.md" \
+  -o .claude/skills/worktree/SKILL.md
+```
+
+**After a restart Claude Code will auto-discover the skill** and make `/worktree` available as a tab-completable slash command in the session.
+
+**Usage after installation:**
+
+```bash
+# Initial setup — wizard asks questions and writes .worktree.yml
+/worktree
+
+# Debug a specific problem — routes to Section 7 diagnostics
+/worktree "I think docker @example-project/docker-compose.yml is not correct"
+/worktree "port 8081 is already in use when I run new-feature"
+/worktree "worktree list shows stale entries after I deleted the branch"
+```
+
 ## TODO
 
 Simple agents workflow configuration is on the roadmap, it is meant to run simple agents for simple needs like housekeeping jobs (npm audit, security audit, code coverage, ...). This feature MAY or MAY NOT be separated in the future. You can experiment and help to evolve it.
 
 - [ ] Battletest simple agents setup
 - [ ] Review Github actions
+- [ ] Review SKILL.md, its very helpfull, but not good enought
 
 ## Contributing
 
