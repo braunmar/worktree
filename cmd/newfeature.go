@@ -294,7 +294,7 @@ func runNewFeature(cmd *cobra.Command, args []string) {
 	// expressions (always 3000, 8080, etc.) instead of the real allocated ports.
 	workCfg.ResolveValueVars(instance, baseEnvVars)
 
-	// Persist computed vars to registry for visibility in `worktree list`
+	// Persist all resolved env vars to registry for visibility and debugging
 	wt.ComputedVars = workCfg.GetComputedVars(baseEnvVars)
 	if err := reg.Save(); err != nil {
 		ui.Warning(fmt.Sprintf("Failed to update registry computed vars: %v", err))

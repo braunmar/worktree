@@ -677,6 +677,8 @@ func TestEnvVarConfig_GetValue(t *testing.T) {
 		name     string
 		portCfg  EnvVarConfig
 		instance int
+		hostname string
+		envVars  map[string]string
 		want     string
 	}{
 		{
@@ -685,6 +687,7 @@ func TestEnvVarConfig_GetValue(t *testing.T) {
 				Port: "3000 + {instance}",
 			},
 			instance: 1,
+			hostname: "localhost",
 			want:     "3001",
 		},
 		{
@@ -693,6 +696,7 @@ func TestEnvVarConfig_GetValue(t *testing.T) {
 				Value: "myproject-{instance}",
 			},
 			instance: 2,
+			hostname: "localhost",
 			want:     "myproject-2",
 		},
 		{
@@ -701,19 +705,54 @@ func TestEnvVarConfig_GetValue(t *testing.T) {
 				Port: "8080",
 			},
 			instance: 0,
+			hostname: "localhost",
 			want:     "8080",
 		},
 		{
 			name:     "empty config",
 			portCfg:  EnvVarConfig{},
 			instance: 0,
+			hostname: "localhost",
 			want:     "",
+		},
+		{
+			name: "{host} substituted with hostname",
+			portCfg: EnvVarConfig{
+				Value: "http://{host}:{FE_PORT}/auth/callback",
+			},
+			instance: 0,
+			hostname: "localhost",
+			envVars:  map[string]string{"FE_PORT": "3005"},
+			want:     "http://localhost:3005/auth/callback",
+		},
+		{
+			name: "{host} substituted with custom hostname",
+			portCfg: EnvVarConfig{
+				Value: "http://{host}:{FE_PORT}/auth/callback",
+			},
+			instance: 0,
+			hostname: "dev.myapp.internal",
+			envVars:  map[string]string{"FE_PORT": "3006"},
+			want:     "http://dev.myapp.internal:3006/auth/callback",
+		},
+		{
+			name: "{host} in value with no port vars",
+			portCfg: EnvVarConfig{
+				Value: "http://{host}/healthz",
+			},
+			instance: 0,
+			hostname: "staging.example.com",
+			want:     "http://staging.example.com/healthz",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := tt.portCfg.GetValue(tt.instance, map[string]string{})
+			envVars := tt.envVars
+			if envVars == nil {
+				envVars = map[string]string{}
+			}
+			got := tt.portCfg.GetValue(tt.instance, envVars, tt.hostname)
 			if got != tt.want {
 				t.Errorf("GetValue(%d) = %q, want %q", tt.instance, got, tt.want)
 			}
@@ -1550,9 +1589,10 @@ func TestResolveValueVars_EmptyConfig(t *testing.T) {
 	}
 }
 
-// TestGetComputedVars_IncludesPortVarsAndValueVars verifies that GetComputedVars returns
-// both port-based vars (FE_PORT, BE_PORT) and value-template vars (OAuth URIs, API URLs).
-func TestGetComputedVars_IncludesPortVarsAndValueVars(t *testing.T) {
+// TestGetComputedVars_IncludesAllResolvedVars verifies that GetComputedVars returns
+// all fully-resolved env vars: port vars, value-template vars (OAuth URIs, API URLs),
+// and aliases — everything that has no unresolved {placeholder} tokens.
+func TestGetComputedVars_IncludesAllResolvedVars(t *testing.T) {
 	cfg := oauthConfig()
 	envVars := cfg.ExportEnvVars(0)
 	envVars["FE_PORT"] = "3003"
@@ -1561,15 +1601,6 @@ func TestGetComputedVars_IncludesPortVarsAndValueVars(t *testing.T) {
 
 	computed := cfg.GetComputedVars(envVars)
 
-	// Port vars MUST now appear
-	if got := computed["FE_PORT"]; got != "3003" {
-		t.Errorf("GetComputedVars[FE_PORT] = %q, want %q", got, "3003")
-	}
-	if got := computed["BE_PORT"]; got != "8083" {
-		t.Errorf("GetComputedVars[BE_PORT] = %q, want %q", got, "8083")
-	}
-
-	// Value-template vars must also appear with resolved values
 	want := map[string]string{
 		"FE_PORT":                    "3003",
 		"BE_PORT":                    "8083",
@@ -1584,6 +1615,49 @@ func TestGetComputedVars_IncludesPortVarsAndValueVars(t *testing.T) {
 	}
 	if len(computed) != len(want) {
 		t.Errorf("GetComputedVars returned %d entries, want %d: %v", len(computed), len(want), computed)
+	}
+}
+
+// TestGetComputedVars_IncludesHostResolvedVars verifies that value-template vars using
+// {host} are fully resolved (via GetValue) and included in computed_vars.
+func TestGetComputedVars_IncludesHostResolvedVars(t *testing.T) {
+	feRange := [2]int{3005, 3104}
+	cfg := &WorktreeConfig{
+		Hostname: "localhost",
+		EnvVariables: map[string]EnvVarConfig{
+			"APP_PORT": {Port: "8085", Env: "APP_PORT", Range: &[2]int{8085, 8184}},
+			"FE_PORT":  {Port: "3005", Env: "FE_PORT", Range: &feRange},
+			"GOOGLE_REDIRECT_URI": {
+				Value: "http://{host}:{FE_PORT}/auth/callback",
+				Env:   "GOOGLE_REDIRECT_URI",
+			},
+			"HTTP_CORS_ALLOW_ORIGINS": {
+				Value: "http://{host}:{FE_PORT}",
+				Env:   "HTTP_CORS_ALLOW_ORIGINS",
+			},
+		},
+	}
+
+	envVars := cfg.ExportEnvVars(0)
+	envVars["APP_PORT"] = "8086"
+	envVars["FE_PORT"] = "3006"
+	cfg.ResolveValueVars(0, envVars)
+
+	computed := cfg.GetComputedVars(envVars)
+
+	want := map[string]string{
+		"APP_PORT":                "8086",
+		"FE_PORT":                 "3006",
+		"GOOGLE_REDIRECT_URI":     "http://localhost:3006/auth/callback",
+		"HTTP_CORS_ALLOW_ORIGINS": "http://localhost:3006",
+	}
+	for k, wantVal := range want {
+		if got := computed[k]; got != wantVal {
+			t.Errorf("computed[%q] = %q, want %q", k, got, wantVal)
+		}
+	}
+	if len(computed) != len(want) {
+		t.Errorf("expected %d entries, got %d: %v", len(want), len(computed), computed)
 	}
 }
 

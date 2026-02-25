@@ -368,9 +368,10 @@ func (pc *EnvVarConfig) GetURL(hostname string, port int) string {
 	return url
 }
 
-// GetValue calculates the value for this port config (either port or string template)
-// Returns empty string if calculation fails
-func (pc *EnvVarConfig) GetValue(instance int, envVars map[string]string) string {
+// GetValue calculates the value for this port config (either port or string template).
+// hostname is used to resolve the {host} placeholder in value templates.
+// Returns empty string if calculation fails.
+func (pc *EnvVarConfig) GetValue(instance int, envVars map[string]string, hostname string) string {
 	if pc.Port != "" {
 		// Port calculation
 		port, err := CalculatePort(pc.Port, instance)
@@ -384,10 +385,13 @@ func (pc *EnvVarConfig) GetValue(instance int, envVars map[string]string) string
 		// String template - substitute placeholders
 		result := pc.Value
 
-		// First substitute {instance}
+		// Substitute {host} with the configured hostname
+		result = strings.ReplaceAll(result, "{host}", hostname)
+
+		// Substitute {instance}
 		result = strings.ReplaceAll(result, "{instance}", fmt.Sprintf("%d", instance))
 
-		// Then substitute port variables like {BE_PORT}, {FE_PORT}, etc.
+		// Substitute port variables like {BE_PORT}, {FE_PORT}, etc.
 		for key, value := range envVars {
 			placeholder := fmt.Sprintf("{%s}", key)
 			result = strings.ReplaceAll(result, placeholder, value)
@@ -408,7 +412,7 @@ func (c *WorktreeConfig) ExportEnvVars(instance int) map[string]string {
 	// First pass: Export all port values (both allocated and calculated ports)
 	for _, portCfg := range c.EnvVariables {
 		if portCfg.Env != "" && portCfg.Port != "" {
-			value := portCfg.GetValue(instance, envVars)
+			value := portCfg.GetValue(instance, envVars, c.Hostname)
 			if value != "" {
 				envVars[portCfg.Env] = value
 			}
@@ -418,7 +422,7 @@ func (c *WorktreeConfig) ExportEnvVars(instance int) map[string]string {
 	// Second pass: Export string templates that depend on ports
 	for _, portCfg := range c.EnvVariables {
 		if portCfg.Env != "" && portCfg.Value != "" {
-			value := portCfg.GetValue(instance, envVars)
+			value := portCfg.GetValue(instance, envVars, c.Hostname)
 			if value != "" {
 				envVars[portCfg.Env] = value
 			}
@@ -571,7 +575,7 @@ func CalculateRelativePath(worktreeDepth int) string {
 func (c *WorktreeConfig) ResolveValueVars(instance int, envVars map[string]string) {
 	for _, portCfg := range c.EnvVariables {
 		if portCfg.Env != "" && portCfg.Value != "" {
-			value := portCfg.GetValue(instance, envVars)
+			value := portCfg.GetValue(instance, envVars, c.Hostname)
 			if value != "" {
 				envVars[portCfg.Env] = value
 			}
@@ -579,10 +583,9 @@ func (c *WorktreeConfig) ResolveValueVars(instance int, envVars map[string]strin
 	}
 }
 
-// GetComputedVars returns all declared env vars (both port-based and value-template)
-// that are fully resolved in the provided envVars map. Entries with unresolved
-// {placeholder} tokens — such as COMPOSE_PROJECT_NAME which uses {project}/{feature}/{service}
-// that are substituted separately — are excluded automatically.
+// GetComputedVars returns all env vars that are fully resolved in the provided envVars map.
+// Entries with unresolved {placeholder} tokens (e.g. COMPOSE_PROJECT_NAME={project}-{feature}-{service})
+// are excluded — they are substituted separately and cannot be stored as-is.
 func (c *WorktreeConfig) GetComputedVars(envVars map[string]string) map[string]string {
 	result := make(map[string]string)
 	for _, portCfg := range c.EnvVariables {
@@ -593,7 +596,7 @@ func (c *WorktreeConfig) GetComputedVars(envVars map[string]string) map[string]s
 		if !ok {
 			continue
 		}
-		// Skip values that still contain unresolved placeholders like {project}, {feature}, {service}
+		// Skip values with unresolved placeholders like {project}, {feature}, {service}
 		if strings.Contains(val, "{") {
 			continue
 		}
