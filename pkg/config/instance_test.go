@@ -404,6 +404,28 @@ func TestReadEnvFileInvalidJSON(t *testing.T) {
 	}
 }
 
+func TestWriteEnvFileWriteError(t *testing.T) {
+	// Writing to a non-existent directory should return an error
+	err := WriteEnvFile("/nonexistent/path/that/does/not/exist", map[string]string{"K": "V"})
+	if err == nil {
+		t.Error("expected error when writing to non-existent directory")
+	}
+}
+
+func TestReadEnvFileReadError(t *testing.T) {
+	// Make the env file path a directory — os.ReadFile will fail with "is a directory", not IsNotExist
+	dir := t.TempDir()
+	envPath := filepath.Join(dir, envFile)
+	if err := os.MkdirAll(envPath, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := ReadEnvFile(dir)
+	if err == nil {
+		t.Error("expected error when env file path is a directory")
+	}
+}
+
 func TestWriteEnvFileOverwrites(t *testing.T) {
 	dir := t.TempDir()
 
