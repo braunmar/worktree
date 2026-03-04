@@ -377,6 +377,13 @@ func runNewFeature(cmd *cobra.Command, args []string) {
 		ui.Warning(fmt.Sprintf("Failed to update registry computed vars: %v", err))
 	}
 
+	// Write feature-specific .worktree-env file for quick lookup from feature directory
+	if err := config.WriteEnvFile(featureDir, wt.ComputedVars); err != nil {
+		ui.Warning(fmt.Sprintf("Failed to write .worktree-env: %v", err))
+	} else {
+		ui.CheckMark("Feature env file created (.worktree-env)")
+	}
+
 	// Generate configured files for each project (e.g., .env.development.local)
 	for _, projectName := range presetCfg.Projects {
 		if err := workCfg.GenerateFiles(projectName, featureDir, baseEnvVars); err != nil {

@@ -9,6 +9,8 @@ import (
 	"time"
 )
 
+const envFile = ".worktree-env.json"
+
 const instanceMarkerFile = ".worktree-instance"
 
 // InstanceContext represents the worktree instance metadata
@@ -134,4 +136,40 @@ func UpdateInstanceYoloMode(featureDir string, yoloMode bool) error {
 	}
 
 	return nil
+}
+
+// WriteEnvFile writes all computed vars to .worktree-env.json in the feature directory.
+func WriteEnvFile(featureDir string, computedVars map[string]string) error {
+	envPath := filepath.Join(featureDir, envFile)
+
+	data, err := json.MarshalIndent(computedVars, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to marshal env vars: %w", err)
+	}
+
+	if err := os.WriteFile(envPath, data, 0644); err != nil {
+		return fmt.Errorf("failed to write env file: %w", err)
+	}
+
+	return nil
+}
+
+// ReadEnvFile reads .worktree-env.json from featureDir and returns all key-value pairs.
+func ReadEnvFile(featureDir string) (map[string]string, error) {
+	envPath := filepath.Join(featureDir, envFile)
+
+	data, err := os.ReadFile(envPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, fmt.Errorf(".worktree-env.json not found in %s", featureDir)
+		}
+		return nil, fmt.Errorf("failed to read env file: %w", err)
+	}
+
+	var vars map[string]string
+	if err := json.Unmarshal(data, &vars); err != nil {
+		return nil, fmt.Errorf("failed to parse env file: %w", err)
+	}
+
+	return vars, nil
 }
