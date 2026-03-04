@@ -177,6 +177,11 @@ func runStart(cmd *cobra.Command, args []string) {
 
 	featureDir := cfg.WorktreeFeaturePath(featureName)
 
+	// Keep .worktree-env in sync with recomputed vars
+	if err := config.WriteEnvFile(featureDir, wt.ComputedVars); err != nil {
+		ui.Warning(fmt.Sprintf("Failed to update .worktree-env: %v", err))
+	}
+
 	// Generate configured files for each project (e.g., .env.development.local)
 	for _, projectName := range projects {
 		if err := workCfg.GenerateFiles(projectName, featureDir, baseEnvVars); err != nil {

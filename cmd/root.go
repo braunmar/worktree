@@ -62,6 +62,7 @@ func init() {
 	rootCmd.AddCommand(doctorCmd)
 	rootCmd.AddCommand(yoloCmd)
 	rootCmd.AddCommand(agentCmd)
+	rootCmd.AddCommand(getEnvCmd)
 
 	// Customize help template
 	rootCmd.SetHelpTemplate(`{{.Long}}

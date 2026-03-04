@@ -331,3 +331,122 @@ func TestWriteInstanceMarkerFields(t *testing.T) {
 		t.Errorf("FE_PORT = %d, want 3002", ctx.Ports["FE_PORT"])
 	}
 }
+
+func TestWriteAndReadEnvFile(t *testing.T) {
+	dir := t.TempDir()
+	input := map[string]string{
+		"APP_PORT":    "8081",
+		"FE_PORT":     "3001",
+		"BACKEND_URL": "http://localhost:8081",
+		"INSTANCE":    "1",
+	}
+
+	if err := WriteEnvFile(dir, input); err != nil {
+		t.Fatalf("WriteEnvFile() error = %v", err)
+	}
+
+	// Verify the file exists
+	envPath := filepath.Join(dir, envFile)
+	if _, err := os.Stat(envPath); os.IsNotExist(err) {
+		t.Fatalf("expected %s to exist after WriteEnvFile", envFile)
+	}
+
+	got, err := ReadEnvFile(dir)
+	if err != nil {
+		t.Fatalf("ReadEnvFile() error = %v", err)
+	}
+
+	if len(got) != len(input) {
+		t.Errorf("len(vars) = %d, want %d", len(got), len(input))
+	}
+	for k, want := range input {
+		if got[k] != want {
+			t.Errorf("vars[%q] = %q, want %q", k, got[k], want)
+		}
+	}
+}
+
+func TestWriteEnvFileEmpty(t *testing.T) {
+	dir := t.TempDir()
+
+	if err := WriteEnvFile(dir, map[string]string{}); err != nil {
+		t.Fatalf("WriteEnvFile() with empty map error = %v", err)
+	}
+
+	got, err := ReadEnvFile(dir)
+	if err != nil {
+		t.Fatalf("ReadEnvFile() error = %v", err)
+	}
+	if len(got) != 0 {
+		t.Errorf("expected empty map, got %v", got)
+	}
+}
+
+func TestReadEnvFileMissingFile(t *testing.T) {
+	dir := t.TempDir()
+
+	_, err := ReadEnvFile(dir)
+	if err == nil {
+		t.Error("expected error when .worktree-env.json does not exist")
+	}
+}
+
+func TestReadEnvFileInvalidJSON(t *testing.T) {
+	dir := t.TempDir()
+	envPath := filepath.Join(dir, envFile)
+	if err := os.WriteFile(envPath, []byte("{not valid json"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := ReadEnvFile(dir)
+	if err == nil {
+		t.Error("expected error for invalid JSON env file")
+	}
+}
+
+func TestWriteEnvFileWriteError(t *testing.T) {
+	// Writing to a non-existent directory should return an error
+	err := WriteEnvFile("/nonexistent/path/that/does/not/exist", map[string]string{"K": "V"})
+	if err == nil {
+		t.Error("expected error when writing to non-existent directory")
+	}
+}
+
+func TestReadEnvFileReadError(t *testing.T) {
+	// Make the env file path a directory — os.ReadFile will fail with "is a directory", not IsNotExist
+	dir := t.TempDir()
+	envPath := filepath.Join(dir, envFile)
+	if err := os.MkdirAll(envPath, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := ReadEnvFile(dir)
+	if err == nil {
+		t.Error("expected error when env file path is a directory")
+	}
+}
+
+func TestWriteEnvFileOverwrites(t *testing.T) {
+	dir := t.TempDir()
+
+	first := map[string]string{"APP_PORT": "8081", "FE_PORT": "3001"}
+	if err := WriteEnvFile(dir, first); err != nil {
+		t.Fatalf("first WriteEnvFile() error = %v", err)
+	}
+
+	second := map[string]string{"APP_PORT": "8082"}
+	if err := WriteEnvFile(dir, second); err != nil {
+		t.Fatalf("second WriteEnvFile() error = %v", err)
+	}
+
+	got, err := ReadEnvFile(dir)
+	if err != nil {
+		t.Fatalf("ReadEnvFile() error = %v", err)
+	}
+	if got["APP_PORT"] != "8082" {
+		t.Errorf("APP_PORT = %q, want %q", got["APP_PORT"], "8082")
+	}
+	if _, exists := got["FE_PORT"]; exists {
+		t.Error("FE_PORT should not exist after overwrite with new map")
+	}
+}
