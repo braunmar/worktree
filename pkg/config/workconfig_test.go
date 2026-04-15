@@ -1906,3 +1906,53 @@ func TestValidate_PortRangeAndDefaultPreset(t *testing.T) {
 		}
 	})
 }
+
+func TestResolveArithmeticPlaceholders(t *testing.T) {
+	envVars := map[string]string{
+		"FE_PORT": "3001",
+		"BE_PORT": "8081",
+	}
+
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{
+			name:  "addition",
+			input: "http://localhost:{FE_PORT+100}",
+			want:  "http://localhost:3101",
+		},
+		{
+			name:  "subtraction",
+			input: "http://localhost:{BE_PORT-1}",
+			want:  "http://localhost:8080",
+		},
+		{
+			// {FE_PORT} (plain) is resolved by the prior substitution pass in GetValue,
+			// not by this function — so it stays as-is here.
+			name:  "arithmetic expression alongside plain placeholder",
+			input: "http://localhost:{FE_PORT},http://localhost:{FE_PORT+100}",
+			want:  "http://localhost:{FE_PORT},http://localhost:3101",
+		},
+		{
+			name:  "unknown variable left as-is",
+			input: "http://localhost:{UNKNOWN_PORT+10}",
+			want:  "http://localhost:{UNKNOWN_PORT+10}",
+		},
+		{
+			name:  "no arithmetic expression untouched",
+			input: "http://localhost:{FE_PORT}",
+			want:  "http://localhost:{FE_PORT}", // plain substitution is done before this step
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := resolveArithmeticPlaceholders(tt.input, envVars)
+			if got != tt.want {
+				t.Errorf("resolveArithmeticPlaceholders(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}

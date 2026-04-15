@@ -4,7 +4,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -370,6 +372,34 @@ func (pc *EnvVarConfig) GetURL(hostname string, port int) string {
 	return url
 }
 
+// arithExprRe matches {VAR_NAME+N} or {VAR_NAME-N} where VAR_NAME is an env var key
+var arithExprRe = regexp.MustCompile(`\{([A-Z_][A-Z0-9_]*)([+-]\d+)\}`)
+
+// resolveArithmeticPlaceholders replaces expressions like {FE_PORT+100} or {BE_PORT-50}
+// using the already-resolved values in envVars. Unresolvable expressions are left as-is.
+func resolveArithmeticPlaceholders(s string, envVars map[string]string) string {
+	return arithExprRe.ReplaceAllStringFunc(s, func(match string) string {
+		sub := arithExprRe.FindStringSubmatch(match)
+		if len(sub) != 3 {
+			return match
+		}
+		varName, opStr := sub[1], sub[2]
+		baseStr, ok := envVars[varName]
+		if !ok {
+			return match
+		}
+		base, err := strconv.Atoi(baseStr)
+		if err != nil {
+			return match
+		}
+		op, err := strconv.Atoi(opStr) // opStr already includes sign (+100 or -50)
+		if err != nil {
+			return match
+		}
+		return strconv.Itoa(base + op)
+	})
+}
+
 // GetValue calculates the value for this port config (either port or string template).
 // hostname is used to resolve the {host} placeholder in value templates.
 // Returns empty string if calculation fails.
@@ -398,6 +428,9 @@ func (pc *EnvVarConfig) GetValue(instance int, envVars map[string]string, hostna
 			placeholder := fmt.Sprintf("{%s}", key)
 			result = strings.ReplaceAll(result, placeholder, value)
 		}
+
+		// Resolve arithmetic expressions like {FE_PORT+100} or {BE_PORT-50}
+		result = resolveArithmeticPlaceholders(result, envVars)
 
 		return result
 	}
