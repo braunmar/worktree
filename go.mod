@@ -1,6 +1,6 @@
 module github.com/braunmar/worktree
 
-go 1.25.7
+go 1.26.2
 
 require (
 	github.com/fatih/color v1.18.0

@@ -17,7 +17,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
-          go-version: '1.25.7'
+          go-version: '1.26.2'
 
       - name: Run go fmt
         run: |
@@ -45,7 +45,7 @@ jobs:
     strategy:
       matrix:
         os: [ubuntu-latest, macos-latest]
-        go-version: ['1.25.7']
+        go-version: ['1.26.2']
     runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout code
@@ -68,14 +68,14 @@ jobs:
         run: go test -v -race -coverprofile=coverage-system.out -covermode=atomic ./test/system/...
 
       - name: Merge coverage profiles
-        if: matrix.os == 'ubuntu-latest' && matrix.go-version == '1.25.7'
+        if: matrix.os == 'ubuntu-latest' && matrix.go-version == '1.26.2'
         run: |
           echo "mode: atomic" > coverage.out
           tail -q -n +2 coverage-unit.out coverage-system.out >> coverage.out
           echo "📊 Coverage profile merged from unit and system tests"
 
       - name: Upload coverage to Codecov
-        if: matrix.os == 'ubuntu-latest' && matrix.go-version == '1.25.7'
+        if: matrix.os == 'ubuntu-latest' && matrix.go-version == '1.26.2'
         uses: codecov/codecov-action@v5
         with:
           file: ./coverage.out
@@ -95,7 +95,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
-          go-version: '1.25.7'
+          go-version: '1.26.2'
 
       - name: Build binary
         run: make build
